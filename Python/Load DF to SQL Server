@@ -1,0 +1,51 @@
+
+#library
+import pyodbc
+import pandas as pd
+import sqlalchemy
+from sqlalchemy.orm import sessionmaker 
+
+
+#Load/view data
+df = pd.read_excel(r"C:/Users/cpalmisano/Desktop/Data/Mat_data.xlsx")
+
+df.head()
+
+
+
+#Connect to DB via SQL Server
+conn = pyodbc.connect('Driver={SQL Server};'   
+                      'Server=******;'   ##SERVER NAME
+                      'Database=****;'       ##DATABASE
+                      'Trusted_Connection=yes;')
+cursor = conn.cursor()
+
+conn.autocommit = True
+
+#Check for database connection
+if (conn == False):
+    print("Connection to Database Error")
+else: 
+    print("Connection to Database Successful")
+    
+
+    
+#Engine to SQL Server
+con = sqlalchemy.create_engine('mssql://SERVER/DATABASE?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server',
+                               fast_executemany=True)    
+
+Session = sessionmaker(bind=con)
+session = Session()    
+
+
+
+# Insert Dataframe into SQL Server:
+print('Loading data to SQL table')  # code to upload dataframe to SQL Server
+
+conn.commit()
+df.to_sql( 'TableName', con, schema='SchemaName', index=True, chunksize=100000, if_exists='append')
+
+print("New data loaded into SQL Server")
+
+
+cursor.close()
