@@ -6,7 +6,7 @@ import pyodbc
 import codecs
 
 
-#Read in Specs for file location and Data Dictionary Details 
+#Read in Specs for file location and Data Dictionary Details with full data
 dd_map = pd.read_excel('//PATH TO  /Data Dictionaries.xlsx',
                            sheet_name = 'Empire')   
 
@@ -24,14 +24,16 @@ for i in range(len(dd_map)):
     positions.append(pos)
     fields.append(field)
 
+##find the files in the range 
 daily_file_dir = '//PATH /Daily Claims Files/WGS/'
 files = [daily_file_dir + x for x in os.listdir(daily_file_dir) if datetime.datetime.strptime(x[55:63], '%Y%m%d') >= datetime.datetime(2022,5,27) and '.out' in x]
 monthly_file_dir = '// PATH /Monthly Claims Files/WGS/'
 files.extend([monthly_file_dir + x for x in os.listdir(monthly_file_dir) if datetime.datetime.strptime(x[73:81], '%Y%m%d') >= datetime.datetime(2022,5,27) and '.out' in x])
 
+#create empty DF
 df_combined = pd.DataFrame()
 
-
+##function to take data from above efforts and input into df_combined
 for file in files:
     with codecs.open(file, 'rb', encoding='utf-8', errors='ignore') as f_in:
         df = pd.read_fwf(f_in, names = fields, colspecs = positions).query('SURPRISE_BILLING == 1')
