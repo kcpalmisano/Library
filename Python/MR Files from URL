@@ -1,0 +1,79 @@
+
+import ijson
+import json
+from gzip import decompress
+from json import loads
+from requests import get
+import pandas as pd
+
+#July_22
+url = 'https://antm-pt-prod-dataz-nogbd-nophi-us-east1.s3.amazonaws.com/anthem/2022-07-01_anthem-*****-HEALTH-FND-METROPOLITAN_allowed-amounts.json.gz'
+
+
+#function to decompress and pull file from url
+def get_gzipped_json(url):
+    return loads(decompress(get(url).content))    
+    
+
+#change url to dataframe for manipulation
+df = pd.DataFrame.from_records(get_gzipped_json(url))
+
+
+#split OON column
+df['out_of_network'].apply(pd.Series)
+
+#create new columns from split
+df = pd.concat([df, df['out_of_network'].apply(pd.Series)], axis=1)
+
+
+#drop old OON column
+df = df.drop(columns= 'out_of_network')
+df
+
+
+#create new df for just nested columns to split
+df10=df
+
+#fix nested 'allowed_amounts'
+df10 = df.explode('allowed_amounts').reset_index(drop=True)
+
+df10['allowed_amounts'].apply(pd.Series)
+df10 = pd.concat([df10, df10['allowed_amounts'].apply(pd.Series)], axis=1)
+df10
+##-----------
+
+#fix nested 'tin'
+df10a = df10.explode('tin').reset_index(drop=True)
+
+df10a['tin'].apply(pd.Series)
+df10a = pd.concat([df10a, df10a['tin'].apply(pd.Series)], axis=1)
+df10a
+
+
+#fix nested 'payments'
+df10b = df10a.explode('payments').reset_index(drop=True)
+
+df10b['payments'].apply(pd.Series)
+df10b = pd.concat([df10b, df10b['payments'].apply(pd.Series)], axis=1)
+df10b
+
+#fix nested 'providers'
+df10c = df10b.explode('providers').reset_index(drop=True)
+
+df10c['providers'].apply(pd.Series)
+df10c = pd.concat([df10c, df10c['providers'].apply(pd.Series)], axis=1)
+df10c
+
+
+#drop old nested columns
+empire = df10c.drop(columns= ['allowed_amounts', 'tin', 'payments',  'providers'])
+empire
+
+empire = empire.drop(columns= [0])
+empire
+
+
+#Download to csv for analysis and upload
+empire = pd.DataFrame.from_records(empire)
+
+empire.to_csv(r'C:\****PATH*****\Desktop\Test_Folder\METROPOLITAN_Aug22_allowed-amounts.csv')
