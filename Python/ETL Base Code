@@ -1,0 +1,45 @@
+
+#sourcing
+import datetime
+
+#gen lib
+import pandas as pd
+import pyodbc
+
+#Set Date domains to make files look neat & pretty
+today = datetime.date.today()
+dateset = today
+mon = str(dateset.month).rjust(2,'0')
+day = str(dateset.day).rjust(2,'0')
+yr = str(dateset.year)[2:]
+
+#Connect to DB via SQL Server
+conn = pyodbc.connect('Driver={SQL Server};'   
+                      'Server=*****;'   ##SERVER NAME
+                      'Database=********;'  ##DATABASE
+                      'Trusted_Connection=yes;')
+cursor = conn.cursor()
+
+con_string = 'Driver={SQL Server};Server=SERVER;Database=DATABASE;Trusted_Connection=Yes' 
+cursor = conn.cursor()
+conn.autocommit = True
+
+#Check for database connection
+if (conn == False):
+    print("Connection Error")
+else: 
+    print("Connection Success")
+
+
+#####Pull data into yearly CSV files
+##2018##
+sql_query18 = pd.read_sql_query('''
+        SELECT * FROM [DATABASE].[SCHEMA].[TABLE]
+		WHERE (service_date)>= '2018-01-01' 
+		and (service_date)<= '2018-12-31'
+		''' ,conn)
+        
+  
+#Run Query and download to local with date of load  
+df = pd.DataFrame(sql_query18)
+df.to_csv( r'C:\ PATH  \Test_Folder\MSHS_'+mon+day+yr+'_2018.csv', index = False )
