@@ -1,0 +1,65 @@
+import datetime
+import pandas as pd
+import pyodbc
+import win32com.client as win32
+
+#Set Date domains to make files look neat & pretty
+today = datetime.date.today()
+dateset = today
+mon = str(dateset.month).rjust(2,'0')
+day = str(dateset.day).rjust(2,'0')
+yr = str(dateset.year)[2:]
+
+
+#Connect to DB via SQL Server
+conn = pyodbc.connect('Driver={SQL Server};'   
+                      'Server=******;'   ##SERVER NAME
+                      'Database=*******;'  ##DATABASE
+                      'Trusted_Connection=yes;')
+cursor = conn.cursor()
+
+conn.autocommit = True
+
+#Check for database connection
+if (conn == False):
+    print("Connection Error")
+else: 
+    print("Connection Success")
+
+
+
+#####SQL Query
+sql = pd.read_sql_query('''
+select * from main.JobDetails a
+inner join (
+	select * from main.jobs
+	where JobStart > dateadd(day, -1, getdate()) 
+	and JobEnd IS NULL
+  ) b
+on b.JobId = a.JobId
+		''' ,conn)
+
+
+#####Email
+def email_send():
+          outlook = win32.Dispatch('outlook.application')
+          mail = outlook.CreateItem(0)
+          mail.To = 'kcpalmisano@gmail.com; johndoe@gmail.com; '
+          mail.Subject = 'Failed Jobs_'+yr+mon+day+'_'
+          mail.Body = sql.to_string()
+          
+          
+          #mail.Send()
+          print("Job Failures Email Sent")
+          mail.Send()
+
+        
+date = datetime.date.today()
+
+
+##Send if today to check for email sent 
+if (date == datetime.date.today()): 
+    email_send()
+    print('Emails Sent')
+else:
+    print('Failed to send email')
