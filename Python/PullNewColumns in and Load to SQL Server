@@ -1,0 +1,104 @@
+###basic load
+#sourcing
+import datetime
+
+#gen lib
+import pandas as pd
+import pyodbc
+import numpy as np
+import sqlalchemy
+ 
+
+#Set Date domains to make files look neat & pretty
+today = datetime.date.today()
+dateset = today
+mon = str(dateset.month).rjust(2,'0')
+day = str(dateset.day).rjust(2,'0')
+yr = str(dateset.year)[2:]
+
+#Connect to DB via SQL Server
+conn = pyodbc.connect('Driver={SQL Server};'   
+                      'Server=*****;'   ##SERVER NAME
+                      'Database=******;'  ##DATABASE
+                      'Schema=******'   ##SCHEMA
+                      'Trusted_Connection=yes;')
+cursor = conn.cursor()
+conn.autocommit = True
+
+
+con = sqlalchemy.create_engine('mssql://*******/******?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server',
+                               fast_executemany=True)   
+
+#Check for database connection
+if (conn == False):
+    print("Connection Error")
+else: 
+    print("Connection Success")
+
+#####SQL 
+print("Truncating Previous Table and loading Archive")
+
+
+#query to truncate tables and change data from raw to archive
+query_data_change = pd.read_sql_query('''
+                          
+TRUNCATE TABLE [DATABASE].[SCHEMA].[QuarterlyRebatesRawArchive];
+
+
+INSERT INTO [DATABASE].[SCHEMA].[QuarterlyRebatesRawArchive]
+SELECT *
+from [DATABASE].[SCHEMA].[QuarterlyRebatesRaw];
+
+TRUNCATE TABLE [DATABASE].[SCHEMA].[QuarterlyRebatesRaw];
+        
+		''' ,conn)
+        
+print("[DATABASE].[DATABASE].[QuarterlyRebatesRaw] has been truncated. Upload new file")
+        
+ ################  File transformation for uploading  ######################       
+        
+#read in file
+df = pd.read_excel(r'C:/ ---PATH---    /_HEALTH_FUND_REB0231879.xlsx')        
+        
+#Change first row to columns 
+header_row = 0
+df.columns = df.iloc[header_row]     
+        
+#drop first row (of column names) 
+df= df.drop([0])
+
+#remove all commas from 'PICO' column
+df['PICO']=df['PICO'].str.replace(',','') 
+        
+
+##Remove '-' from money rates and replace with NULL
+df['Guarantee Rx Rate $']=df['Guarantee Rx Rate $'].replace('-',np.nan) 
+df['Guarantee Rx']=df['Guarantee Rx'].replace('-',np.nan)  
+df['Guarantee $']=df['Guarantee $'].replace('-',np.nan)  
+df['Rebateable Rx']=df['Rebateable Rx'].replace('-',np.nan)  
+df['Billed $']=df['Billed $'].replace('-',np.nan)  
+df['Factored Billed Client Share %']=df['Factored Billed Client Share %'].replace('-',np.nan)  
+df['Factored Billed Client Share $']=df['Factored Billed Client Share $'].replace('-',np.nan)  
+df['Collected $']=df['Collected $'].replace('-',np.nan)  
+df['Client Share %']=df['Client Share %'].replace('-',np.nan)  
+df['Client Share $']=df['Client Share $'].replace('-',np.nan)  
+
+
+#adjust column names to correct naming convention 
+df = df.rename({'Submit Year Month':'Submit_Year_Month', 'Carrier ID':'Carrier_ID', 'Carrier Name':'Carrier_Name', 'Account ID':'Account_ID', 'Account Name':'Account_Name', 'Group ID':'Group_Id', 'Group Name':'Group_Name', 'Disb Custom Category':'Disb_Custom_Category', 'Claim Type':'Claim_Type', 'Disb Brand Class':'Disb_Brand_Class', 'Guarantee Rx':'Guarantee_Rx', 'Guarantee Rx Rate $':'Guarantee_Rx_Rate_Amt', 'Guarantee $':'Guarantee_Amt', 'Rebateable Rx':'Rebateable_Rx', 'Billed $':'Billed_Amt', 'Factored Billed Client Share %':'Factored_Billed_Client_Share_Pct', 'Factored Billed Client Share $':'Factored_Billed_Client_Share_Amt', 'Collected $':'Collected_Amt', 'Client Share %':'Client_Share_Pct', 'Client Share $':'Client_Share_Amt', 'Total Due $':'Total_Due_Amt', 'Paid Previously $':'Paid_Previously_Amt', 'Current Paid $':'Current_Paid_Amt'}, axis=1)
+
+###Just in case
+#Download to local file
+#df.to_csv(r'C:\ ---PATH---  \OptumRx_'+yr+mon+day+'_.csv')
+## Manual way to import data via SQL Svr import tool https://skyvia.com/blog/3-easy-ways-to-import-csv-file-to-sql-server
+
+
+###Load data to SQL Server
+print("Writing data to QuarterlyRebatesRaw")
+
+conn.commit()
+df.to_sql('QuarterlyRebatesRaw', con, schema='SCHEMA', chunksize=100000, if_exists='append', index=False)
+
+print("New data loaded to QuarterlyRebatesRaw")
+
+cursor.close()
