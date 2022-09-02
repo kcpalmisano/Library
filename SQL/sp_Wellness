@@ -1,0 +1,142 @@
+USE [DATABASE]
+GO
+/****** Object:  StoredProcedure [SCHEMA].[sp_Wellness_flags]    Script Date: 
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+/*
+	Author:		Casey Palmisano
+	Notes:		This SP populates a table for flag creation of Wellness warnings and disenrollments
+	Updates:	Active No Appt criteria  Line 86 & 113 Updated by Casey P on Nicole R recommendation DATE
+	****		Added eligibility criteria Lines 133 thru 139 Updated by Casey P on Brenda P recommendation DATE
+
+*/
+
+Create procedure [SCHEMA].[sp_Wellness_flags]
+AS
+BEGIN
+
+	set nocount on;
+
+	----BEGIN actual stored procedure 
+
+
+Drop table if exists #WELLNESS;
+
+SELECT  distinct *, 
+CAST (funds_dateactive as date) as funds_date_active,
+CASE WHEN (five_star) = 'ACP' THEN 'ADVANTAGE CARE PHYSICIANS'   --create column to help with abbreviation identification of 5star facilities
+		WHEN (five_star) = 'ATRIUS' THEN 'ATRIUS HEALTH' 
+		WHEN (five_star) = 'AVENEL' THEN 'AVENEL ISELIN'
+		WHEN (five_star) = 'CAMBRIDGE' THEN 'CAMBRIDGE HEALTH ALLIANCE CENTER'
+		WHEN (five_star) = 'CRYSTAL' THEN 'CRYSTAL RUN HEALTHCARE'
+		WHEN (five_star) = 'EAST BOSTON' THEN 'EAST BOSTON NEIGHBORHOOD HEALTH CENTER'
+		WHEN (five_star) = 'EVERSIDE' THEN 'Everside Health'
+		WHEN (five_star) = 'FOREST' THEN 'FOREST HILLS'
+		WHEN (five_star) = 'GEISINGER' THEN 'GEISINGER HEALTH SYSTEM'
+		WHEN (five_star) = 'IFH' THEN 'INSTITUTE FOR FAMILY HEALTH'
+		WHEN (five_star) = 'PREMIER' THEN 'PREMIER MEDICAL ASSOCIATES'
+		WHEN (five_star) = 'PROHEALTH' THEN 'PROHEALTH PHYSICIANS'
+		WHEN (five_star) = 'RIVERDALE' THEN 'RIVERDALE FAMILY PRACTICE'
+		WHEN (five_star) = 'SANITAS' THEN 'SANITA MEDICAL CENTER'
+		WHEN (five_star) = 'SUMMIT' THEN 'SUMMIT HEALTH'
+		WHEN (five_star) = 'UHC' THEN 'THE UNION HEALTH CENTER'
+		WHEN (five_star) = 'WESTMED' THEN 'WESTMEND MEDICAL GROUP'
+			ELSE NULL END AS FiveStar_Facility
+	INTO #WELLNESS						-- drop into temp table for first part
+FROM (SELECT DISTINCT person_id, funds_sourcename
+		,[funds_dateactive] , funds_disease1name, funds_facilityname, funds_outreach
+    	FROM DATABASE.SCHEMA.funds_enrollment 
+    	WHERE funds_programname = 'Wellness' and statuscodename = 'Participating' and statecodename = 'Active') a   --Get the members that are in Wellness, active, and participating
+	LEFT JOIN ( Select distinct ClaimNr, PERSON_ID as claim_personID,  PaidDate, ServiceStartDate, ServiceEndDate,	
+				ClaimEntryDate,	HealthCardId,	RenderingName,	BillingNPI,	BillingName, BillingTaxId,	GroupNr
+				from SCHEMA.ClaimsData 
+				where ServiceStartDate > GETDATE() - 1460) b   --EVENTUALLY get the last 2 years of data (730)
+		ON a.person_id = b.claim_personID
+	LEFT Join (Select distinct (person_id) as fs_personid, prov_tax_id ,five_star FROM SCHEMA.FIVE_STAR_ATTRIBUTION_MP) c  --see the member's most recent 5 star visit 
+		ON b.BillingTaxId = c.prov_tax_id and a.person_id = c.fs_personid;
+
+
+
+
+Drop table if exists #well1; 
+
+---------------- RULES FOR FLAGS -------------------
+-- Outside usage is 6 months post enrollment = Warn
+-- Outisde usage is 3 months post warning = disenroll
+-- Active no Appt is 6 months post enrollment = Warn
+-- Active no Appt is 3 months post warning = disenroll
+-- NO recent usage is 9 months post enrollment = Warn
+-- NO recent usage is 3 months post warning = disenroll
+-- Using other 5 star in 6 months =  warn 
+
+
+
+--create temp table with warning flags
+ SELECT *							 
+		   --six months outside 5star usage =warning
+	,Case WHEN SOUNDEX(Funds_facilityname) <> SOUNDEX(FiveStar_Facility)     ---SOUNDEX compares names in similarity 
+			OR FiveStar_Facility IS NULL
+			AND funds_date_active < getdate() - 180 
+			OR ServiceStartDate < getdate() - 180 
+	THEN 1 ELSE 0 END AS Warn_OutsideUsage 
+			 --six months active no appt =warning
+	,Case when datediff(day, funds_date_active, getdate()) >180       
+			AND ServiceStartDate IS NULL                               --Criteria updated by Casey P on Nicole R recommendation
+	THEN 1 ELSE 0 END as Warn_ActiveNoApt
+			 --nine months no recent usage =warn
+	,Case when datediff(day, funds_date_active, getdate()) >270 
+			AND datediff(day, ServiceStartDate, getdate()) >270 THEN 1 ELSE 0 END as Warn_NoUsage
+		     --Warning to have member switch back
+	,Case WHEN SOUNDEX(Funds_facilityname) <> SOUNDEX(FiveStar_Facility) 
+			OR FiveStar_Facility IS NULL
+			AND datediff(day, funds_date_active, getdate()) >180 
+			AND datediff(day, ServiceStartDate, getdate()) >180
+	THEN 1 ELSE 0 END AS Warn_Switch
+ INTO #well1
+ FROM #WELLNESS
+
+
+ Drop table if exists #well2; 
+
+ --create temp table with disenrollment flags
+ Select  *				
+ 			--nine months outside 5star usage =disenrollment
+	,Case when SOUNDEX(Funds_facilityname) <> SOUNDEX(FiveStar_Facility) 
+		OR FiveStar_Facility IS NULL
+		AND	datediff(day, funds_date_active, getdate()) >270
+		AND Warn_outsideusage = 1 
+	THEN 1 ELSE 0 END AS DisEn_OutsideUsage	
+			--nine months active no appt =disenrollment
+	,Case when datediff(day, funds_date_active, getdate()) >270  
+		AND 	ServiceStartDate IS NULL             --Criteria updated by Casey P on Nicole R recommendation
+		AND	Warn_ActiveNoApt = 1 
+	THEN 1 ELSE 0 END as DisEn_ActiveNoApt	
+			--twelve months no recent usage =disenroll
+	,Case when datediff(day, funds_date_active, getdate()) >365  
+		AND	datediff(day, ServiceStartDate, getdate()) >365
+		AND Warn_ActiveNoApt = 1 
+	THEN 1 ELSE 0 END as DisEn_NoUsage	
+ into #well2
+ from #well1;
+
+
+ 
+ Drop table [SCHEMA].[Wellness_flags]; --clear table of previous data
+
+
+ Select *                   --put information for #well2 into final table for use
+ INTO [DATABASE].[SCHEMA].[Wellness_flags]
+ from #well2 w
+ Inner join (
+		select count(distinct( ELIGIBILITY_MONTH)) as count,PERSON_ID as personid         --Marking for eligibility 
+		from [DATABASE].[SCHEMA].[ELIGIBILITY_BY_MONTH_V3]
+			where ELIGIBILITY_MONTH IN ( 'AUG 2022', 'JUL 2022' )    ---- Pulling in Eligibility for past two months  ******Needs EVENTUAL update to numeric*******
+				and MEDICAL_HOSPITAL = 'Empire'		
+			Group BY PERSON_ID
+			Having count(distinct ELIGIBILITY_MONTH) = 2) e
+on e.PERSONID = w.person_id
+ ;
+
+END
