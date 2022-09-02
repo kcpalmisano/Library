@@ -1,0 +1,145 @@
+Use [DATABASE]
+
+
+-------------------------SPINE CLAIMS-----------------
+
+------------------OUTREACH------------------
+DECLARE @esrd_hiv   Table (value varchar(8));		---ESRD and HIV exclusion codes 
+INSERT INTO @esrd_hiv  VALUES ('I120'), ('I1311'), ('I132'), ('N184'), ('N186'), --- <--ESRD 
+('B20'), ('B9735'), ('D806'), ('D808'), ('D809'), ('D831'), ('R75'), ('Z21'); --- <--HIV
+
+DROP TABLE IF EXISTS #spine_codeset;
+select distinct (b.hfclaimlineid)        --- create a table based on claims data and exclusions
+ , a.hfclaimid
+ , a.diagnosisrelatedgroupassigned as drg_code 
+ , b.diagnosisrelatedgroupDesc as drg_desc
+ , b.ClaimNr
+ , b.PERSON_ID
+ , b.ServiceStartDate
+ , b.HCPCS
+ , c.DOB
+ , b.ClaimPaidAmount
+ , b.Deceased   
+ , D.IsCatchmentAreaMountSinaiWest
+INTO #spine_codeset
+from SCHEMA.DiagnosisRelatedGroupAssigned a 
+ left join  Empire.ClaimsData b 
+	ON b.HfClaimId = a.HfClaimId
+	inner join (
+		SELECT DISTINCT PERSON_ID, DOB					---Exclude all persons outside of age range 18< & <75
+			FROM CRM_ELIGIBILITY   
+				WHERE DATEADD(year, 18, DOB) <= getdate()			--18 years or older
+					AND DATEADD(year, 75, DOB) >= getdate()) c		--75 years or younger
+				ON c.PERSON_ID = b.PERSON_ID
+		inner join (
+			SELECT zipcode, IsCatchmentAreaMountSinaiWest, IsValid  ---Mt. Sinai West catchement area by zipcode and MSHW 
+				FROM [DATABASE].[SCHEMA].[vwZipCodesData]
+					WHERE IsCatchmentAreaMountSinaiWest = 1
+						AND IsValid = 1) D
+					ON D.zipcode = b.MemberZipCode
+ WHERE  b.ClaimPaidAmount > 0		---Claim paid must be something
+	AND b.IsMaternity = '0'			---Not maternity		
+	AND b.Deceased IS NULL			---Not deceased  
+	AND b.DischargeStatus  NOT IN ('20', '41', '42', '7') AND  --death and left against medical advice discharge codes
+ b.DiagnosisCodePrinciple NOT IN (SELECT VALUE FROM @esrd_hiv) or  ---ESRD / HIV codes to exclude from above
+ b.DiagnosisCode1  NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode2  NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode3  NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode4  NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode5  NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode6  NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode7  NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode8  NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode9  NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode10 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode11 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode12 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode13 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode14 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode15 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode16 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode17 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode18 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode19 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode20 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode21 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode22 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode23 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode24 NOT IN (SELECT VALUE FROM @esrd_hiv) or
+ b.DiagnosisCode25 NOT IN (SELECT VALUE FROM @esrd_hiv);
+
+
+---------------------------CLAIMS------------------------------ 
+--- Establish table based on above exclusions and including DRG / CPT codes
+DECLARE @lumbar_cpt   Table (value varchar(8));				---lumbar cpt codes
+INSERT INTO @lumbar_cpt  VALUES ('22533') , ('22558'), ('22586'), ('22612'), ('22630'), ('22633'), ('22857'); 
+
+DECLARE @cervical_cpt   Table (value varchar(8));			---cervical cpt codes
+INSERT INTO @cervical_cpt  VALUES ('22551'), ('22554'), ('22600'), ('22856');    
+
+DECLARE @decompression_cpt   Table (value varchar(8));		---decompression cpt codes
+INSERT INTO @decompression_cpt  VALUES ('63001'), ('63005'), ('63011'), ('63012'), ('63020'), ('63030'), ('63040'), ('63042'), ('63045'), ('63047');  
+
+DECLARE @lumbar_drg  Table (value varchar(8));				---lumbar drg codes 
+INSERT INTO @lumbar_drg VALUES ('459'), ('460');
+
+DECLARE @cervical_drg  Table (value varchar(8));			---cervical drg codes  
+INSERT INTO @cervical_drg VALUES ('473'), ('472'), (' 473');
+
+DECLARE @decompression_drg  Table (value varchar(8));		---decompression drg codes   
+INSERT INTO @decompression_drg VALUES ('518'), ('519'), ('520');        
+
+
+DROP TABLE IF EXISTS #spine_Sxtemp1;
+SELECT DISTINCT(HfClaimLineId), HfClaimId, ClaimNr, ServiceStartDate, PERSON_ID, HCPCS, DOB, drg_code, drg_desc
+INTO #spine_Sxtemp1
+FROM #spine_codeset a
+	WHERE (a.HCPCS in (SELECT VALUE FROM @cervical_cpt)
+			OR a.HCPCS in (SELECT VALUE FROM @decompression_cpt)
+			OR a.HCPCS in (SELECT VALUE FROM @lumbar_cpt))
+		OR (drg_code IN (SELECT VALUE FROM @cervical_drg)
+				OR drg_code IN (SELECT VALUE FROM @lumbar_drg)
+				OR drg_code IN (SELECT VALUE FROM	@decompression_drg));
+
+
+DROP TABLE IF EXISTS #spine_Sxtemp;
+Select * 
+into #spine_Sxtemp
+from #spine_Sxtemp1
+ where ServiceStartDate > dateadd(year, -1, getdate());  -- one (1) year from service start date
+
+
+---Updated needed from HOSPITAL for further code development
+----------------------------------DEV-----------------------------
+
+-------------------   FURTHER OUTREACH DEV
+DROP TABLE If EXISTS #Spine_OutTemp;
+
+SELECT b.PERSON_ID, b.HfClaimLineId, b.HfClaimId, b.ClaimNr, b.ServiceStartDate, b.HCPCS, a.diagnosisrelatedgroupassigned as drg_code 
+, b.diagnosisrelatedgroupDesc as drg_desc, b.ServiceStartDate, 
+b.ProviderSpecialtyCode, b.FileType, b.DiagnosisCodePrinciple, b.DiagnosisCode1, b.DiagnosisCode2, b.DiagnosisCode3, b.DiagnosisCode4 
+--,b.DiagnosisCode5, b.DiagnosisCode6, b.DiagnosisCode7, b.DiagnosisCode8, b.DiagnosisCode9, b.DiagnosisCode10 , b.DiagnosisCode11, 
+--b.DiagnosisCode12, b.DiagnosisCode13, b.DiagnosisCode14,b.DiagnosisCode15, b.DiagnosisCode16, b.DiagnosisCode17, b.DiagnosisCode18, 
+--b.DiagnosisCode19, b.DiagnosisCode20, b.DiagnosisCode21, b.DiagnosisCode22, b.DiagnosisCode23, b.DiagnosisCode24, b.DiagnosisCode25 
+--INTO #Spine_OutTemp
+FROM Empire.DiagnosisRelatedGroupAssigned a 
+ left join Empire.ClaimsData b 
+	ON b.HfClaimId = a.HfClaimId         --------------------- ^ Runs correctly
+	inner join (
+		SELECT DISTINCT PERSON_ID, DOB					---Exclude all persons outside of age range 18< & <75
+			FROM CRM_ELIGIBILITY   
+				WHERE DATEADD(year, 18, DOB) <= getdate()			--18 years or older
+					AND DATEADD(year, 75, DOB) >= getdate()) c		--75 years or younger
+				ON c.PERSON_ID = b.PERSON_ID
+		inner join (
+			SELECT zipcode, IsCatchmentAreaMountSinaiWest, IsValid  ---HOSPITAL catchement area by zipcode and MSHW 
+				FROM [DATABASE].[SCHEMA].[vwZipCodesData]
+					WHERE IsCatchmentAreaMountSinaiWest = 1
+						AND IsValid = 1) D
+					ON D.zipcode = b.MemberZipCode
+ WHERE b.Deceased IS NULL			---Not dead
+	AND b.PERSON_ID IS NULL;		---Availible for outreach         -- ^ Runs correctly separately
+
+
+
+
