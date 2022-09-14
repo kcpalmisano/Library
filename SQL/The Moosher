@@ -1,0 +1,341 @@
+-- "Mooshing" by claimnr, claimlinenr, claimadjustmentnr 
+
+
+use DATABASE; 
+
+--------------------------CODE start for transformation--------------------------------
+
+
+Drop table if exists #CT1;
+
+---Transform code for MAX and SUM fields
+select distinct  ClaimNr, ClaimLineNr , ClaimAdjustmentNr,
+  sum(ClaimChargedAmount) as Total_ClaimChargedAmount,       
+  sum(ClaimPaidAmount) as Total_ClaimPaidAmount,	         
+  sum(ClaimLineChargedAmount) as Total_ClaimLineChargedAmount,		
+  sum(ClaimLinePaidAmount) as Total_ClaimLinePaidAmount,			
+  sum(PaidServiceUnitCount) as Total_PaidServiceUnitCount,			
+  sum(CopayAmount) as Total_CopayAmount,					
+  sum(CoinsuranceAmount)	as Total_CoinsuranceAmount,			
+  sum(DeductibleAmount) as Total_DeductibleAmount	,			
+  sum(ApprovedAmount)	 as Total_ApprovedAmount,				
+  sum(MemberPenaltyAmount) as Total_MemberPenaltyAmount	,			
+  sum(CoveredExpenseAmount) as Total_CoveredExpenseAmount	,
+  sum(BilledServiceUnitCount) as Total_BilledServiceUnitCount,
+  MAX(ServiceEndDate) as ServiceEndDate    ---might need to be in the last entry code below
+      into #CT1
+    from Empire.ClaimsSourceTable
+    group by  claimnr, ClaimLineNr, ClaimAdjustmentNr
+    order by claimNr, ClaimLineNr , ClaimAdjustmentNr
+
+
+
+Drop table if exists #claims;
+
+--- "the big ugly" taking of all the other fields (that will not need last filled field) and making something workable with it
+select  distinct b.*
+  ,GroupNr,SubgroupNr,MemberSSN, MemberName , InvestigationClaimCode, HCPCS_Modifier1, HCPCS_Modifier2,  HCPCS_Modifier3,  HCPCS_Modifier4
+  ,ClaimLineStatusCode, Deceased, RenderingTaxId, BillingTaxId, ServiceRenderingType, AdmitDate, DischargeDate,AuthorizationNr
+  ,DiagnosisCodeAdmit,DiagnosisCodeAdmitPOA,DiagnosisCodePrinciple,DiagnosisCodePrinciplePOA,DiagnosisCode1,DiagnosisCode1POA,DiagnosisCode2,DiagnosisCode2POA,DiagnosisCode3,DiagnosisCode3POA,DiagnosisCode4,DiagnosisCode4POA,DiagnosisCode5,DiagnosisCode5POA,DiagnosisCode6,DiagnosisCode6POA,DiagnosisCode7,DiagnosisCode7POA,DiagnosisCode8,DiagnosisCode8POA,DiagnosisCode9,DiagnosisCode9POA
+  ,DiagnosisCode10,DiagnosisCode10POA,DiagnosisCode11,DiagnosisCode11POA,DiagnosisCode12,DiagnosisCode12POA,DiagnosisCode13	,DiagnosisCode13POA,DiagnosisCode14,DiagnosisCode14POA,DiagnosisCode15,DiagnosisCode15POA,DiagnosisCode16,DiagnosisCode16POA,DiagnosisCode17,DiagnosisCode17POA,DiagnosisCode18	,DiagnosisCode18POA,DiagnosisCode19,DiagnosisCode19POA,DiagnosisCode20,DiagnosisCode20POA,DiagnosisCode21,DiagnosisCode21POA,DiagnosisCode22,DiagnosisCode22POA,DiagnosisCode23,DiagnosisCode23POA,DiagnosisCode24,DiagnosisCode24POA,DiagnosisCode25,DiagnosisCode25POA
+  ,ProcedureCode1,ProcedureCode2,ProcedureCode3,ProcedureCode4,ProcedureCode5,ProcedureCode6,ProcedureCode7,ProcedureCode8,ProcedureCode9,ProcedureCode10,ProcedureCode11,ProcedureCode12,ProcedureCode13,ProcedureCode14,ProcedureCode15,ProcedureCode16,ProcedureCode17,ProcedureCode18,ProcedureCode19,ProcedureCode20,ProcedureCode21,ProcedureCode22,ProcedureCode23,ProcedureCode24,ProcedureCode25
+  ,ProfitabilityCode, Region, ServiceStartDate, PlaceOfService, ProviderLocationCode, InNetworkCode, ProviderClassCode, Par
+  ,ClaimEntryDate, PrimaryCarrierResponsibilityCode, PackageNr, EmployerGroupDepartmentNr, COBSavingsAmount, BillingNPI, DischargeStatus, AdmitTypeCode, DiagnosisRelatedGroup, ICDVersion
+  ,TypeOfBillCode, DiagnosisRelatedGroupType, RateCategory, RateSubcategory, RevenueCode, BenefitPaymentTierCode, DiagnosisRelatedGroupSeverity
+    INTO #claims
+   from Empire.ClaimsSourceTable a 
+      left join #CT1  b ON  b.claimnr = a.ClaimNr and b.claimlinenr = a.ClaimLineNr and b.ClaimAdjustmentNr = a.ClaimAdjustmentNr;
+ 
+
+
+Drop table if exists #temp1;
+
+---take care of columns that may have or may not have recent additions so use the last listed field in the column related to the claim number, line, & adjustment
+select distinct T.claimnr, T.claimlinenr, T.ClaimAdjustmentNr,
+       first_value(T.DenialReasonCode) 
+          over(partition by T.NA 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as DenialReasonCode,
+       first_value(T.DenialReasonDescription)      
+          over(partition by T.NB 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as DenialReasonDescription,
+	   first_value(T.PaidDate)      
+          over(partition by T.NC 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as PaidDate,
+	   first_value(T.PostDate)      
+          over(partition by T.ND 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as PostDate,
+	   first_value(T.PatientSSN) 
+          over(partition by T.NE 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as PatientSSN,
+       first_value(T.DependentNr)      
+          over(partition by T.NF
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as DependentNr,
+	   first_value(T.HCPCS)      
+          over(partition by T.NG 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as HCPCS,
+	   first_value(T.PERSON_ID)      
+          over(partition by T.NH 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as PERSON_ID,
+		first_value(T.PatientName) 
+          over(partition by T.NI 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as PatientName,
+       first_value(T.PatientGender)      
+          over(partition by T.NJ 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as PatientGender,
+	   first_value(T.MemberRelationshipCode)      
+          over(partition by T.NK 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as MemberRelationshipCode,
+	   first_value(T.MemberAddress1)      
+          over(partition by T.NL 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as MemberAddress1,
+	   first_value(T.MemberAddress2)      
+          over(partition by T.NP 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as MemberAddress2,
+		first_value(T.MemberCity) 
+          over(partition by T.NM 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as MemberCity,
+       first_value(T.MemberState)      
+          over(partition by T.NN 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as MemberState,
+	   first_value(T.MemberZipCode)      
+          over(partition by T.NO 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as MemberZipCode,
+	   first_value(T.RenderingName) 
+          over(partition by T.NQ 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as RenderingName,
+       first_value(T.RenderingAddress1)      
+          over(partition by T.NR 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as RenderingAddress1,
+	   first_value(T.RenderingAddress2)      
+          over(partition by T.NS 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as RenderingAddress2,
+	   first_value(T.RenderingCity)      
+          over(partition by T.NT 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as RenderingCity,
+		first_value(T.RenderingState) 
+          over(partition by T.NU 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as RenderingState,
+       first_value(T.RenderingZipCode)      
+          over(partition by T.NV 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as RenderingZipCode,
+	   first_value(T.RenderingZipCode4)      
+          over(partition by T.NW 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as RenderingZipCode4,
+	   first_value(T.BillingName)      
+          over(partition by T.NX 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as BillingName,
+		first_value(T.BillingAddress1) 
+          over(partition by T.NY 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as BillingAddress1,
+       first_value(T.BillingAddress2)      
+          over(partition by T.NZ 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as BillingAddress2,
+	   first_value(T.BillingCity)      
+          over(partition by T.MA 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as BillingCity,
+	   first_value(T.BillingState)      
+          over(partition by T.MB 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as BillingState,
+		first_value(T.BillingZipCode) 
+          over(partition by T.MC 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as BillingZipCode,
+       first_value(T.BillingZipCode4)      
+          over(partition by T.MD 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as BillingZipCode4,
+	   first_value(T.EPIN)      
+          over(partition by T.ME 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as EPIN,
+	   first_value(T.ProviderSpecialtyCode)      
+          over(partition by T.MF 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as ProviderSpecialtyCode,
+		first_value(T.ProviderContractType) 
+          over(partition by T.MG 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as ProviderContractType,
+       first_value(T.ProviderSpecialtyCodeAlt)      
+          over(partition by T.MH 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as ProviderSpecialtyCodeAlt,
+	   first_value(T.CountyCode)      
+          over(partition by T.MI
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as CountyCode,
+	   first_value(T.PatientDOB)      
+          over(partition by T.MJ 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as PatientDOB,
+		first_value(T.HealthCardId) 
+          over(partition by T.MK 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as HealthCardId,
+		first_value(T.RenderingNPI) 
+          over(partition by T.MK 
+               order by T.claimlinenr 
+               rows between unbounded preceding and current row) as RenderingNPI
+	INTO #temp1
+from (
+     select claimnr,
+			claimlinenr,
+			ClaimAdjustmentNr,
+      DenialReasonCode,
+			DenialReasonDescription,
+			PaidDate,
+			PostDate,
+			PatientSSN,
+			DependentNr,
+			HCPCS,
+			PERSON_ID,
+			PatientName,
+			PatientGender,
+			MemberRelationshipCode,
+			MemberAddress1,
+			MemberCity,
+			MemberState,
+			MemberZipCode, 
+			MemberAddress2,
+			RenderingName,
+			RenderingAddress1,
+			RenderingAddress2,
+			RenderingCity,
+			RenderingState,
+			RenderingZipCode,
+			RenderingZipCode4,
+			BillingName,
+			BillingAddress1,
+			BillingAddress2,
+			BillingCity,
+			BillingState,
+			BillingZipCode,
+			BillingZipCode4,
+			EPIN,
+			ProviderSpecialtyCode,
+			ProviderContractType,
+			ProviderSpecialtyCodeAlt,
+			CountyCode,
+			PatientDOB,
+			HealthCardId,
+			RenderingNPI,
+      sum(case when DenialReasonCode is null then 0 else 1 end) 
+              over(order by claimlinenr) as NA,
+      sum(case when DenialReasonDescription is null then 0 else 1 end) 
+              over(order by claimlinenr) as NB,
+	    sum(case when PaidDate is null then 0 else 1 end) 
+              over(order by claimlinenr) as NC,
+      sum(case when PostDate is null then 0 else 1 end) 
+              over(order by claimlinenr) as ND,
+	    sum(case when PatientSSN is null then 0 else 1 end) 
+              over(order by claimlinenr) as NE,
+      sum(case when DependentNr is null then 0 else 1 end) 
+              over(order by claimlinenr) as NF,
+	    sum(case when HCPCS is null then 0 else 1 end) 
+              over(order by claimlinenr) as NG,
+      sum(case when PERSON_ID is null then 0 else 1 end) 
+              over(order by claimlinenr) as NH,
+      sum(case when PatientName is null then 0 else 1 end) 
+              over(order by claimlinenr) as NI,
+      sum(case when PatientGender is null then 0 else 1 end) 
+              over(order by claimlinenr) as NJ,
+	    sum(case when MemberRelationshipCode is null then 0 else 1 end) 
+              over(order by claimlinenr) as NK,
+      sum(case when MemberAddress1 is null then 0 else 1 end) 
+              over(order by claimlinenr) as NL,
+	    sum(case when MemberAddress2 is null then 0 else 1 end) 
+              over(order by claimlinenr) as NP,
+	    sum(case when MemberCity is null then 0 else 1 end) 
+              over(order by claimlinenr) as NM,
+      sum(case when MemberState is null then 0 else 1 end) 
+              over(order by claimlinenr) as NN,
+	    sum(case when MemberZipCode is null then 0 else 1 end) 
+              over(order by claimlinenr) as 'NO',
+	    sum(case when RenderingName is null then 0 else 1 end) 
+              over(order by claimlinenr) as NQ,
+      sum(case when RenderingAddress1 is null then 0 else 1 end) 
+              over(order by claimlinenr) as NR,
+	    sum(case when RenderingAddress2 is null then 0 else 1 end) 
+              over(order by claimlinenr) as NS,
+      sum(case when RenderingCity is null then 0 else 1 end) 
+              over(order by claimlinenr) as NT,
+      sum(case when RenderingState is null then 0 else 1 end) 
+              over(order by claimlinenr) as NU,
+      sum(case when RenderingZipCode is null then 0 else 1 end) 
+              over(order by claimlinenr) as NV,
+	    sum(case when RenderingZipCode4 is null then 0 else 1 end) 
+              over(order by claimlinenr) as NW,
+      sum(case when BillingName is null then 0 else 1 end) 
+              over(order by claimlinenr) as NX,
+	    sum(case when BillingAddress1 is null then 0 else 1 end) 
+              over(order by claimlinenr) as NY,
+      sum(case when BillingAddress2 is null then 0 else 1 end) 
+              over(order by claimlinenr) as NZ,
+	    sum(case when BillingCity is null then 0 else 1 end) 
+              over(order by claimlinenr) as MA,
+      sum(case when BillingState is null then 0 else 1 end) 
+              over(order by claimlinenr) as MB,
+	    sum(case when BillingZipCode is null then 0 else 1 end) 
+              over(order by claimlinenr) as MC,
+      sum(case when BillingZipCode4 is null then 0 else 1 end) 
+              over(order by claimlinenr) as MD,
+      sum(case when EPIN is null then 0 else 1 end) 
+              over(order by claimlinenr) as ME,
+      sum(case when ProviderSpecialtyCode is null then 0 else 1 end) 
+              over(order by claimlinenr) as MF,
+      sum(case when ProviderContractType is null then 0 else 1 end) 
+              over(order by claimlinenr) as MG,
+	    sum(case when ProviderSpecialtyCodeAlt is null then 0 else 1 end) 
+              over(order by claimlinenr) as MH,
+      sum(case when CountyCode is null then 0 else 1 end) 
+              over(order by claimlinenr) as MI,
+	    sum(case when PatientDOB is null then 0 else 1 end) 
+              over(order by claimlinenr) as MJ,
+      sum(case when HealthCardId is null then 0 else 1 end) 
+              over(order by claimlinenr) as MK,
+	    sum(case when RenderingNPI is null then 0 else 1 end) 
+              over(order by claimlinenr) as ML
+     from Empire.ClaimsSourceTable
+     ) as T
+  order by ClaimNr, ClaimLineNr, ClaimAdjustmentNr;			
+
+
+
+  ---final join
+select * 
+   INTO Empire.FINAL_TABLE_LOCATION
+	from #claims c
+		left join #temp1 t ON
+			t.claimnr = c.claimnr and t.ClaimLineNr = c.claimlinenr AND t.ClaimAdjustmentNr = c.ClaimAdjustmentNr
+   order by c.claimnr asc, c.claimlinenr asc, c.ClaimAdjustmentNr asc;			
+
+
+
