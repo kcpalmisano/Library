@@ -1,0 +1,369 @@
+#basic load
+import os
+import xlsx
+import csv
+import pandas as pd
+import matplotlib as plt
+import numpy as np
+import seaborn as sns
+
+
+df = pd.read_csv(r'C:/Users/cpalmisano/Desktop/Empire_MRF/Empire/InNetwork_Rates/32BJ_NJ_36BO_in-network-rates.csv')
+
+
+#Understanding my variables
+df.head()
+df.shape
+df.columns
+
+
+df.nunique()
+df.describe().apply(lambda s: s.apply(lambda x: format(x, 'f')))  #max/min/etc.
+
+
+df.column_name.unique()
+
+
+# Reclassify 'condition' column
+def clean_condition(row):
+    
+    good = ['good','fair']
+    excellent = ['excellent','like new']       
+    
+    if row.condition in good:
+        return 'good'   
+    if row.condition in excellent:
+        return 'excellent'    
+    return row.condition
+
+# Clean dataframe
+def clean_df(playlist):
+    df_cleaned = df.copy()
+    df_cleaned['condition'] = df_cleaned.apply(lambda row: clean_condition(row), axis=1)
+    return df_cleaned
+
+# Get df with reclassfied 'condition' column
+df_cleaned = clean_df(df)
+print(df_cleaned.condition.unique())
+
+
+#remove redundant/un-needed columns 
+df_cleaned = df_cleaned.copy().drop(['url','image_url','city_url'], axis=1)
+
+
+#Remove columns that have 40% or more NULL columns 
+NA_val = df_cleaned.isna().sum()
+def na_filter(na, threshold = .4): #only select variables that passees the threshold
+    col_pass = []
+    for i in na.keys():
+        if na[i]/df_cleaned.shape[0]<threshold:
+            col_pass.append(i)
+    return col_pass
+df_cleaned = df_cleaned[na_filter(NA_val)]
+df_cleaned.columns
+
+
+#Remove outliers based on criteria set by user
+df_cleaned = df_cleaned[df_cleaned['price'].between(999.99, 99999.00)]
+df_cleaned = df_cleaned[df_cleaned['year'] > 1990]
+df_cleaned = df_cleaned[df_cleaned['odometer'] < 899999.00]
+df_cleaned.describe().apply(lambda s: s.apply(lambda x: format(x, 'f')))
+
+
+#drop rows with NULL values
+df_cleaned = df_cleaned.dropna(axis=0)
+df_cleaned.shape
+
+
+#################__---Explore for 2 variables
+
+###-----Correlation matrix 
+
+# calculate correlation matrix
+corr = df_cleaned.corr()
+# plot the heatmap
+sns.heatmap(corr, xticklabels=corr.columns, yticklabels=corr.columns, annot=True, cmap=sns.diverging_palette(220, 20, as_cmap=True))
+
+
+
+###------- Scatter plot(s)
+
+df_cleaned.plot(kind='scatter', x='odometer', y='price')
+df_cleaned.plot(kind='scatter', x='year', y='price')
+
+####------ Create scatter plots for all variables 
+sns.pairplot(df_cleaned)
+
+
+#################__---Explore for 1 variables
+
+###------ Histogram(s) 
+df_cleaned['odometer'].plot(kind='hist', bins=50, figsize=(12,6), facecolor='grey',edgecolor='black')
+df_cleaned['year'].plot(kind='hist', bins=20, figsize=(12,6), facecolor='grey',edgecolor='black')
+
+df_cleaned['year'].plot(kind='hist', bins=20, figsize=(12,6), facecolor='grey',edgecolor='black')
+
+
+#####--------- Box Plots
+df_cleaned.boxplot('price')
+
+
+
+test = df
+
+
+test
+
+dedupe= test.drop_duplicates(subset = [ 'negotiated_rate', 'billing_code', 'npi', 'billing_code_type_version' ]) 
+
+dedupe
+
+dedupe.nunique()
+
+df1 = dedupe
+
+df1.to_csv(r'C:\Users\cpalmisano\Desktop\MRF_NJ_dd.csv')
+
+
+#sourcing
+import os
+import os.path
+import urllib
+import tarfile
+import csv
+import requests
+
+#gen lib
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import mysql.connector
+ 
+ 
+#upload excel file
+df_title = pd.read_excel(r'C:\Users\path... .xlsx')
+#upload csv file
+df_title = pd.read_csv(r'path_to_file.csv')
+#upload html file
+df_title = pd.read_html(path_to_file)
+
+# Can add additional inputs of (r'path.csv', sep='|', names=m_cols , encoding='latin-1')
+#'latin-1' works well for an error  "UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe9"
+#returns unique values for the column
+df['Column1'].unique()
+
+#returns column names
+df.columns
+
+#Returns shape (rows and columns)
+df.shape
+
+#returns counts of all listed values in a column
+df['Column1'].value_counts()
+
+#count all columns unique values
+df.nunique()
+
+#count all entries in a column
+df.count(0)
+#Determine amount of dates in dataset between two months
+df1= df['Date_column'].dt.month.between(11,12)  #11 and 12 are Nov to Dec
+df2 = df.loc[df1]
+
+#Get days from a certain date onward
+new_df = df[(df['Date_column'] > '2020-10-1') & (df['Date_column'] <= '2021-3-5')]
+# value count on date
+pd.to_datetime(df['date_column']).dt.year.value_counts()
+#.year can also be month or day (or times)
+#drop extra attributes
+df.drop(['column1', 'column2', ], inplace=True, axis=1)   #(0 or ‘index’) or columns (1 or ‘columns’).
+#returns T/F if column contains null values
+df['Column'].isnull()
+#drop rows containing missing values
+df.dropna(axis=0) 
+
+#drop columns containing missing values
+df.dropna(axis=1)
+
+#Take the rows in "column1" that do NOT contain null in column1
+df = df[df['column1'].notna()]
+
+#drop column
+cols_to_drop = ["col1", "col2"]
+df = df.drop(columns= cols_to_drop, axis=1)
+ 
+#Select certain values in columns
+
+#To select rows whose column value equals a scalar, some_value, use ==:
+df.loc[df['column_name'] == some_value]
+
+#To select rows whose column value is in an iterable, some_values, use isin:
+df.loc[df['column_name'].isin(some_values)]
+
+#Combine multiple conditions with &:
+df.loc[(df['column_name'] >= A) & (df['column_name'] <= B)]
+
+#Note the parentheses. Due to Python's operator precedence rules, & binds more tightly than <= and >=. Thus, the parentheses in the last example are necessary. Without the parentheses
+df['column_name'] >= A & df['column_name'] <= B
+
+#is parsed as
+df['column_name'] >= (A & df['column_name']) <= B
+#which results in a Truth value of a Series is ambiguous error.
+
+#To select rows whose column value does not equal some_value, use !=:
+df.loc[df['column_name'] != some_value]
+
+#isin returns a boolean Series, so to select rows whose value is not in some_values, negate the boolean Series using ~:
+df.loc[~df['column_name'].isin(some_values)]
+#rename columns
+df_title = df.rename({'Listed_name':'New_Name', 'MAIL_ADDR1':'Address'}, axis=1)
+#Add a column 
+df['New_column_name'] = df['ID'] + "Word"
+
+#  = new column with [ID]Word as entries
+#remove duplicates
+df.drop_duplicates(subset ="column_name", 
+                     keep = False, inplace = True) 
+
+#keep{‘first’, ‘last’, False}, default ‘first’
+#Determines which duplicates (if any) to keep. - first : Drop duplicates except for the first occurrence. - last : Drop duplicates except for the last occurrence. - False : Drop all duplicates.
+
+#inplacebool, default False
+#Whether to drop duplicates in place or to return a copy.
+#Sort rows by column value (false = descending)
+df.sort_values("Column1", inplace = True, ascending=False)
+#reorder column names
+df_title = df[['column2', 'column5', 'column1', 'column6']]
+#split a column name **Note the | is how to determine where to split and n is the amount of columns needed
+df_title = df["ColumnNameThatIsUsuallyVeryLongAndMessy"].str.split("|", n=20, expand = True)
+
+df_title["column"] = df_title[0]
+df_title["column"] = df_title[1]
+df_title["column"] = df_title[2]
+df_title.drop([0,1,2], inplace= True, axis=1)
+df_title.head()
+#change all columns of Dataframe to numeric (float64), but leave strings as strings
+for i in range(0, len(df.columns)):
+    df.iloc[:,i] = pd.to_numeric(df.iloc[:,i], errors='ignore')
+#convert to int64
+df['column'] = df['column'].astype('Int64')
+
+#convert to object
+df['column'] = df['column'].astype('object')
+
+#**in case you have None or missing values in one of your dataframes, you need to use Int64 instead of int. 
+
+
+to_numeric() #provides functionality to safely convert non-numeric types (e.g. strings) to a suitable numeric type. (See also to_datetime() and to_timedelta().)
+
+astype() #convert (almost) any type to (almost) any other type (even if it's not necessarily sensible to do so). Also allows you to convert to categorial types (very useful).
+                                                                 
+infer_objects() #a utility method to convert object columns holding Python objects to a pandas type if possible.
+                                                                
+df.convert_dtypes().dtypes  #convert DataFrame columns to the "best possible" dtype that supports pd.NA (pandas' object to indicate a missing value).
+
+#https://stackoverflow.com/questions/15891038/change-column-type-in-pandas
+#changes an index to a column
+df.reset_index()
+#filter out rows not meeting the condition
+df[df[‘Population’] > 20000000]]
+
+#filter out rows not meeting the condition
+df.query(“Population > 20000000”)
+#Join two columns to create a new column
+df["newColumn"] = df["First Name"] + " " + df["Last Name"]
+ 
+#####------------------------------------------------------Joins and Merges
+#Simple merge
+df_title = pd.merge(df1, df2)
+
+#merge on a column
+df_title = pd.merge(df1, df2, on='column_name')
+
+#merge on specific columns with different names
+df_title = pd.merge(df1, df2, left_on='Column_key', right_on='Primary_Column', how='outer')
+
+#Index merge
+df_title = pd.merge(df1, df2, left_index=True, right_index=True)
+#OR
+df_title = df1.join(df2)
+
+#combine indices and columns
+df_title = pd.merge(df1a, df3, left_index=True, right_on='name'
+                    
+#Different Join Types
+df_title = pd.merge(df1, df2, how='outer')
+                    #outer = returns everything and if missing with an NA 
+                    #left/right = joins over respective table 
+                    #inner = only the intersection of the two tables 
+#complex multi matching column join
+df_title = pd.merge(df1, df2, on=('column1', 'column5', 'source', 'Rank'), how='left')
+ 
+#Change Null to None
+df = df.where(pd.notnull(df), None)
+df.head()
+ 
+#download to a csv file
+df.to_csv('FILE_NAME.csv')
+#download to a tsv file
+df.to_csv('FILE_NAME.tsv', sep = '\t', index=False)
+ 
+####--------------------------------------------JSON from API to Table
+import pandas as pd
+import requests
+url = 'https://coinmap.org/api/v1/venues/''   
+#url = 'whatever api it is'
+r = requests.get(url)
+r
+
+json = r.json()
+json
+json.keys()
+#lists different keys in json file
+#create and view dataframe
+df = pd.DataFrame(json['venues'])
+df
+#list counts of column specified
+df1 = df1.groupby("column").count()
+df1
+#list counts of column specified by other column count
+df1 = df1.groupby("created_on")["name"].count()
+df1
+ 
+####----------------------------------------Read JSON from URL
+# import urllib library
+from urllib.request import urlopen
+
+# import json
+import json
+# store the URL in url as 
+# parameter for urlopen
+url = "https://www.reddit.com/r/opiates.json"
+
+# store the response of URL
+response = urlopen(url)
+
+# storing the JSON response 
+# from url in data
+data_json = json.loads(response.read())
+  
+# print the json response
+print(data_json)
+ 
+ 
+ 
+##Visualization of Happiness Score: Using Choropleth feature
+
+#Ref: https://plot.ly/python/choropleth-maps/
+data = dict(type = 'choropleth', 
+           locations = wh['Country'],
+           locationmode = 'country names',
+           z = wh['Happiness.Score'], 
+           text = wh['Country'],
+           colorbar = {'title':'Happiness'})
+layout = dict(title = 'Happiness Index 2017', 
+             geo = dict(showframe = False, 
+                       projection = {'type': 'Mercator'}))
+choromap3 = go.Figure(data = [data], layout=layout)
+iplot(choromap3)
+
