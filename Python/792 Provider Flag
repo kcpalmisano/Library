@@ -1,0 +1,78 @@
+
+import pandas as pd
+import numpy as np
+from datetime import date
+import os
+import pyodbc
+import sys
+import logging
+import sqlalchemy
+from sqlalchemy.orm import sessionmaker 
+
+#Logging for errors / outputs
+logging.basicConfig(filename=r'C:\Users\ --PATH-- \Logging\Errors.txt', level=logging.DEBUG,  format='%(asctime)s %(levelname)s %(name)s %(message)s')
+logger=logging.getLogger(__name__) 
+
+stdoutOrigin=sys.stdout    ###---output to txt
+sys.stdout = open(r'C:\Users\ --PATH-- \Logging\Output.txt', 'a')
+
+### Get date for tracking
+today1= date.today()   
+print('792_Flag_Start', today1)
+
+#Connect to DB via SQL Server
+conn = pyodbc.connect('Driver={SQL Server};'   
+                      'Server=SERVER;'           ##SERVER NAME
+                      'Database=DATABASE;'       ##DATABASE
+                      'Trusted_Connection=yes;')
+cursor = conn.cursor()
+
+conn.autocommit = True
+
+#Check for database connection
+if (conn == False):
+    print("Connection HFW Error")
+else: 
+    print("Connection HFW Successful")
+    
+
+    
+###Connect to SQL Server
+con = sqlalchemy.create_engine('mssql:// -SERVER- / -DATABASE- ?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server',
+                               fast_executemany=True)    
+
+Session = sessionmaker(bind=con)
+session = Session()    
+
+#Loading the .txt file
+df = pd.read_csv('// --PATH-- /Empire_32BJ_Flag792.txt' , sep=';' , header=0, index_col=False)
+
+
+#Fix spec4code column name. There is more WAAAAAAY over there --->                                                                                                                                  I swear. It IS over there --->                                                                                                                                                   Keep Going....                                                                                                                                 Almost there!                                           YAY!!
+df = df.rename({'SPEC4CODE                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               ':'SPEC4CODE'}, axis=1)
+
+###add a date column that is empty
+df['Date_added'] = np.nan
+
+
+### Insert data into SQL Server
+print('Loading new 792 Flag Table data to SQL table')  # code to upload dataframe to SQL Server
+
+conn.commit()
+df.to_sql( '792_Provider_Flag', con, schema='SCHEMA', index=False, chunksize=100000, if_exists='replace')
+
+print("New data loaded into 792 Flag Table") #
+
+
+#Date loaded update statement 
+sql_query = pd.read_sql_query('''
+ 	Update DATABASE.SCHEMA.[792_Provider_Flag]    ---add date loaded to 792_Provider_Flag
+		set [Date_added] = getdate()
+		where [Date_added] IS NULL;
+		''' ,conn)
+
+
+conn.close()
+
+today= date.today()   
+print('792_Update_Complete', today)
