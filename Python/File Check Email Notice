@@ -1,0 +1,70 @@
+#gen lib
+import pandas as pd
+import pyodbc
+import sqlalchemy
+import os.path
+from pathlib import Path
+import win32com.client as win32
+
+
+
+#Connect to DB via SQL Server
+conn = pyodbc.connect('Driver={SQL Server};'   
+                      'Server=SERVER;'       ##SERVER NAME
+                      'Database=DATABASE;'   ##DATABASE
+                      'Trusted_Connection=yes;')
+cursor = conn.cursor()
+
+conn.autocommit = True
+
+engine = sqlalchemy.create_engine('mssql://SERVER/DATABASE?trusted_connection=yes&driver=ODBC+Driver+13+for+SQL+Server')
+
+
+#Check for database connection and print 
+if (conn == False):
+    print("Error")
+else: 
+    print("Success")
+
+#Pull in Excel file
+new_Optum = pd.read_excel(r'C:/Users/ ----PATH---- /rebates.xlsx')
+##EVENTUALLY new_Optum = pd.read_excel(r' ---PATH-----/_REB0231879.xlsx')
+
+
+#define functions with mailing cababilities to mail need to find or modify and run batch
+def find_file():
+        outlook = win32.Dispatch('outlook.application')
+        mail = outlook.CreateItem(0)
+        mail.To = 'cpalmisano@email.com; kchan@email.com'
+        mail.Subject = 'Find Optum File'
+        mail.Body = """
+        Optum Rebate file NOT present. Please obtain file.
+        """
+       # mail.Send()
+        print('Find Optum')
+        mail.Send()
+
+        
+def run_file():
+          outlook = win32.Dispatch('outlook.application')
+          mail = outlook.CreateItem(0)
+          mail.To = 'cpalmisano@email.com'
+          mail.Subject = 'Run Optum Batch'
+          mail.Body = """
+          Please run Optum batch
+             """
+          #mail.Send()
+          print('Run Optum')
+          mail.Send()
+
+
+#check for file existance
+path_to_file = r'C:/Users/ ----PATH--- /rebates.xlsx'         
+path = Path(path_to_file)
+
+file_exists = os.path.exists(path_to_file)
+
+if (file_exists == False):
+    find_file()
+else:
+    run_file()
