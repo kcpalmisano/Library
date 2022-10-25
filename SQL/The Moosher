@@ -1,7 +1,7 @@
 --Casey Palmisano 9/9/22  Mooshing by claimnr, claimlinenr, claimadjustmentnr 
 --TAKE2 
 
-use Health_Fund_Working;
+use DATABASE;
 
 
 --------------------------CODE start for transformation 
@@ -36,7 +36,7 @@ sum(BilledServiceUnitCount) as Total_BilledServiceUnitCount,
 CASE WHEN sum(BilledServiceUnitCount) = 0 THEN 1 ELSE 0 END AS CanceledOut_BilledServiceUnitCount,
 MAX(ServiceEndDate) as ServiceEndDate
 into #temp1
-from Empire.ClaimsSource_TEST
+from SCHEMA.ClaimsSource_TEST
 group by ClaimNr;
 
 Drop table if exists #temp2;
@@ -52,7 +52,7 @@ select  distinct claimnr, claimlinenr, ClaimAdjustmentNr
 ,ClaimEntryDate, PrimaryCarrierResponsibilityCode, PackageNr, EmployerGroupDepartmentNr, COBSavingsAmount, BillingNPI, DischargeStatus, AdmitTypeCode, DiagnosisRelatedGroup, ICDVersion
 ,TypeOfBillCode, DiagnosisRelatedGroupType, RateCategory, RateSubcategory, RevenueCode, BenefitPaymentTierCode, DiagnosisRelatedGroupSeverity
 into #temp2
-from Empire.ClaimsSource_TEST;
+from SCHEMA.ClaimsSource_TEST;
 
 
 Drop table if exists #temp3;
@@ -195,7 +195,7 @@ select  distinct T.claimnr, T.claimlinenr, T.ClaimAdjustmentNr,
           over(partition by T.MH 
                order by T.claimlinenr 
                rows between unbounded preceding and current row) as ProviderSpecialtyCodeAlt,
-	   first_value(T.CountyCode)      
+	   	first_value(T.CountyCode)      
           over(partition by T.MI
                order by T.claimlinenr 
                rows between unbounded preceding and current row) as CountyCode,
@@ -274,7 +274,7 @@ from (
               over(order by claimlinenr) as NI,
             sum(case when PatientGender is null then 0 else 1 end) 
               over(order by claimlinenr) as NJ,
-			sum(case when MemberRelationshipCode is null then 0 else 1 end) 
+	    sum(case when MemberRelationshipCode is null then 0 else 1 end) 
               over(order by claimlinenr) as NK,
             sum(case when MemberAddress1 is null then 0 else 1 end) 
               over(order by claimlinenr) as NL,
@@ -330,7 +330,7 @@ from (
               over(order by claimlinenr) as MK,
 	    sum(case when RenderingNPI is null then 0 else 1 end) 
               over(order by claimlinenr) as ML
-     from Empire.ClaimsSource_TEST
+     from SCHEMA.ClaimsSource_TEST
      ) as T
   order by ClaimNr, ClaimLineNr, ClaimAdjustmentNr;	
 
@@ -343,7 +343,9 @@ GroupNr,SubgroupNr,MemberSSN, MemberName , InvestigationClaimCode, HCPCS_Modifie
 ,ProcedureCode1,ProcedureCode2,ProcedureCode3,ProcedureCode4,ProcedureCode5,ProcedureCode6,ProcedureCode7,ProcedureCode8,ProcedureCode9,ProcedureCode10,ProcedureCode11,ProcedureCode12,ProcedureCode13,ProcedureCode14,ProcedureCode15,ProcedureCode16,ProcedureCode17,ProcedureCode18,ProcedureCode19,ProcedureCode20,ProcedureCode21,ProcedureCode22,ProcedureCode23,ProcedureCode24,ProcedureCode25
 ,ProfitabilityCode, Region, ServiceStartDate, PlaceOfService, ProviderLocationCode, InNetworkCode, ProviderClassCode, Par
 ,ClaimEntryDate, PrimaryCarrierResponsibilityCode, PackageNr, EmployerGroupDepartmentNr, COBSavingsAmount, BillingNPI, DischargeStatus, AdmitTypeCode, DiagnosisRelatedGroup, ICDVersion
-,TypeOfBillCode, DiagnosisRelatedGroupType, RateCategory, RateSubcategory, RevenueCode, BenefitPaymentTierCode, DiagnosisRelatedGroupSeverity, ttt.* from #temp2 tt
+,TypeOfBillCode, DiagnosisRelatedGroupType, RateCategory, RateSubcategory, RevenueCode, BenefitPaymentTierCode, DiagnosisRelatedGroupSeverity, 
+ttt.* 
+from #temp2 tt
    Left join #temp1 t on t.claimNr = tt.ClaimNr
    Left join #temp3 ttt on ttt.ClaimNr = tt.ClaimNr AND ttt.ClaimLineNr = tt.ClaimLineNr AND ttt.ClaimAdjustmentNr = tt.ClaimAdjustmentNr
    ORDER by tt.claimnr, tt.claimlinenr, tt.ClaimAdjustmentNr
