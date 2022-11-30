@@ -43,28 +43,45 @@ CASE WHEN (five_star) = 'ACP' THEN 'ADVANTAGE CARE PHYSICIANS'   --create column
 		WHEN (five_star) = 'UHC' THEN 'THE UNION HEALTH CENTER'
 		WHEN (five_star) = 'WESTMED' THEN 'WESTMEND MEDICAL GROUP'
 			ELSE NULL END AS FiveStar_Facility,
-		 CAST(NULL as DATE) as [date],					---add date column for tracking
-		 CAST(NULL AS varchar) AS [JobId]				---add jobid column for tracking
-	INTO #WELLNESS						-- drop into temp table for first part
+		 CAST(NULL as DATE) as [date],					--- add date column for tracking
+		 CAST(NULL AS varchar) AS [JobId]				--- add jobid column for tracking
+	INTO #WELLNESS							--- drop into temp table for first part
 FROM (SELECT DISTINCT person_id, funds_sourcename
-		,[funds_dateactive] , funds_disease1name, funds_facilityname, funds_outreach
-    	FROM Health_Fund_Working.d365.funds_enrollment 
-    	WHERE funds_programname = 'Wellness' and statuscodename = 'Participating' AND statecodename = 'Active') a   --Get the members that are in Wellness, active, and participating
-	LEFT JOIN ( Select distinct ClaimNr, PERSON_ID as claim_personID,  PaidDate, ServiceStartDate, ServiceEndDate,	
-				ClaimEntryDate,	HealthCardId,	RenderingName,	BillingNPI,	BillingName, BillingTaxId,	GroupNr
-				from Empire.ClaimsData 
-				where ServiceStartDate > GETDATE() - 1460) b   --EVENTUALLY get the last 2 years of data (730)
+		, [funds_dateactive] 
+		, funds_disease1name
+		, funds_facilityname
+		, funds_outreach
+		, funds_warningdate
+    	FROM DATABASE.SCHEMA.funds_enrollment 
+    	WHERE funds_programname = 'Wellness' and statuscodename = 'Participating' AND statecodename = 'Active') a   --Get the members that are in Wellness, active, and participating
+	LEFT JOIN ( Select distinct ClaimNr
+					, PERSON_ID as claim_personID
+					,  PaidDate
+					, ServiceStartDate
+					, ServiceEndDate
+					, ClaimEntryDate
+					, HealthCardId
+					, RenderingName
+					, BillingNPI
+					, BillingName
+					, BillingTaxId
+					, GroupNr
+				from SCHEMA.ClaimsData 
+				where ServiceStartDate >= '2019-01-01' ) b  --GETDATE() - 1460) b   --4 year date range (currently)  
 		ON a.person_id = b.claim_personID
-	LEFT Join (Select distinct (person_id) as fs_personid, prov_tax_id ,five_star FROM dbo.FIVE_STAR_ATTRIBUTION_MP) c  --see the member's most recent 5 star visit 
-		ON b.BillingTaxId = c.prov_tax_id and a.person_id = c.fs_personid;
+	LEFT Join (Select distinct (person_id) as fs_personid, prov_tax_id ,five_star FROM SCHMEA.FIVE_STAR_ATTRIBUTION_MP) c  --see the member's most recent 5 star visit 
+		ON b.BillingTaxId = c.prov_tax_id and a.person_id = c.fs_personid
+	LEFT JOIN (select [funds_fein] FROM [SERVER].[DATABASE].[SCHEMA].[funds_providerorganization] ) fp
+		ON fp.funds_fein = b.billingTaxID;
 
+		
+---tax id for 5starcenters is in  [DATABASE].[SCHEMA].[funds_providerorganization] in [funds_fein]
 
 Drop table if exists #well1; 
-
 --create temp table with warning flags
  SELECT *							 
 		   --six months outside 5star usage =warning
-	,Case WHEN SOUNDEX(Funds_facilityname) <> SOUNDEX(FiveStar_Facility)   -- using soundex to see if faciliyt names are similar enough 
+	,Case WHEN BillingTaxId = funds_fein    ---comparing tax id
 			OR FiveStar_Facility IS NULL
 			AND funds_date_active < getdate() - 180 
 			OR ServiceStartDate < getdate() - 180 
@@ -77,7 +94,7 @@ Drop table if exists #well1;
 	,Case when datediff(day, funds_date_active, getdate()) >270 
 			AND datediff(day, ServiceStartDate, getdate()) >270 THEN 1 ELSE 0 END as Warn_NoUsage
 		     --Warning to have member switch back
-	,Case WHEN SOUNDEX(Funds_facilityname) <> SOUNDEX(FiveStar_Facility) 
+	,Case WHEN BillingTaxId = funds_fein
 			OR FiveStar_Facility IS NULL
 			AND datediff(day, funds_date_active, getdate()) >180 
 			AND datediff(day, ServiceStartDate, getdate()) >180
@@ -91,7 +108,7 @@ Drop table if exists #well1;
  --create temp table with disenrollment flags
  Select  *				
  			--nine months outside 5star usage =disenrollment
-	,Case when SOUNDEX(Funds_facilityname) <> SOUNDEX(FiveStar_Facility) 
+	,Case when BillingTaxId = funds_fein
 		OR FiveStar_Facility IS NULL
 		AND	datediff(day, funds_date_active, getdate()) >270
 		AND Warn_outsideusage = 1    ----look in funds enrollment
@@ -110,15 +127,16 @@ Drop table if exists #well1;
  from #well1;
 
 
-Drop table if exists #eligtemp; 
+Drop table if exists #eligtmp; 
 
-select  a.*, LEFT(a.ELIGIBILITY_MONTH, CHARINDEX(' ', a.ELIGIBILITY_MONTH + ' ') -1) as Elg_Month,
+select  a.*, LEFT(a.ELIGIBILITY_MONTH, CHARINDEX(' ', a.ELIGIBILITY_MONTH + ' ') -1) as Elg_Month, 
        STUFF(a.ELIGIBILITY_MONTH, 1, Len(a.ELIGIBILITY_MONTH) +1- CHARINDEX(' ',Reverse(a.ELIGIBILITY_MONTH)), '') as Elg_Year
-	   INTO #eligtemp
-from [dbo].[ELIGIBILITY_BY_MONTH_V3] a
+	   INTO #eligtmp
+from [SCHEMA].[ELIGIBILITY_BY_MONTH_V3] a
 
 
-Drop table if exists #elgtmp; 
+
+Drop table if exists #elgtemp;  ----change months to numbers in new column ELIG_Month
 
 select *, 
 	 case WHEN Elg_Month = 'JAN' THEN 1
@@ -134,22 +152,65 @@ select *,
 		  WHEN Elg_Month = 'NOV' THEN 11
 		  WHEN Elg_Month = 'DEC' THEN 12
 	 ELSE NULL END AS ELIG_Month
-	 INTO #elgtmp
-	from #eligtemp;
+	 INTO #elgtemp
+	from #eligtmp;
+
+	drop table #WELLNESS;
+	Drop table #eligtmp; 
+	drop table #well1;
 
 
-Truncate table [Empire].[Wellness_flags];						  --clear table of previous data
+--drop table [SCHEMA].[Wellness_flags];	
+Truncate table [SCHEAM].[Wellness_flags];						  --clear table of previous data
 
-INSERT INTO [Health_Fund_Working].[Empire].[Wellness_flags]		  --put information for #well2 into final table for use
-	 Select *     
+INSERT INTO [DATABASE].[SCHEMA].[Wellness_flags]		  --put information for #well2 into final table for use
+	 Select distinct w.person_id
+	 , e.ELIG_Month
+	 , e.Elg_Year
+	 , e.Medical_Hospital
+	 , Warn_OutsideUsage
+	 , Warn_ActiveNoApt
+	 , Warn_NoUsage
+	 , Warn_Switch
+	 , DisEn_OutsideUsage
+	 , DisEn_ActiveNoApt
+	 , DisEn_NoUsage
+	 , funds_warningdate
+	 , funds_sourcename
+	 , funds_disease1name
+	 , funds_facilityname
+	 , ClaimNr
+	 , PaidDate
+	 , ServiceStartDate
+	 , ServiceEndDate
+	 , ClaimEntryDate
+	 , HealthCardId
+	 , RenderingName
+	 , BillingNPI
+	 , BillingName
+	 , BillingTaxId
+	 , GroupNr
+	 , fs_personid
+	 , prov_tax_id
+	 , five_star
+	 , funds_date_active
+	 , FiveStar_Facility
+	 , [date]
+	 , JobId
+		--INTO [DATABASE].[SCHEMA].[Wellness_flags]	
 		from #well2 w
-			Inner join (
-				select count(distinct( ELIGIBILITY_MONTH)) as count, PERSON_ID as personid
-				 from #elgtmp
-				 where ELIG_Month = month(getdate()) OR ELIG_Month = month(getdate()) -1
-				 and Elg_Year = YEAR(getdate())   ---- Pulling in Eligibility for past two months 
-				 and MEDICAL_HOSPITAL = 'Empire'		
-					Group BY PERSON_ID
-					Having count(distinct ELIGIBILITY_MONTH) = 2) e
-on e.PERSONID = w.person_id;
+			LEFT join #elgtemp e
+				--select * count(distinct( ELIGIBILITY_MONTH)) as count, PERSON_ID
+				 --from #elgtemp
+				-- where ELIG_Month >= month(getdate()) -2 and Elg_Year = YEAR(getdate())   ----  Use for Pulling in Eligibility for past two months 
+				-- and MEDICAL_HOSPITAL = 'Empire'		
+					--Group BY PERSON_ID
+					--Having count(distinct ELIGIBILITY_MONTH) >= 3) e
+			 on e.PERSON_ID = w.person_id
+			 where ClaimNr IS NOT NULL			 
+			 and YEAR(ServiceStartDate) = Elg_Year     --- these 2 lines minimize the data to only the eligibity year and month based on Service Start Date
+			 and MONTH(ServiceStartDate) = ELIG_Month OR MONTH(ServiceStartDate) - 2 = ELIG_Month;
+			 
+			 
+			 
 END
