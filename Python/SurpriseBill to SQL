@@ -84,7 +84,7 @@ print('Loading new Surprise Bill numbers to SQL table')
 
 # code to upload dataframe to SQL Server
 conn.commit()
-df.to_sql( 'TABLE_NAME', con, schema='SCHEMA_NAME', index=True, chunksize=100000, if_exists='append')
+df.to_sql( 'TABLE_NAME', con, schema='SCHEMA_NAME', index=False, chunksize=100000, if_exists='replace')
 
 
 print("New data loaded into Surprisebill_Raw")
