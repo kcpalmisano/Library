@@ -10,20 +10,22 @@ import sqlalchemy
 from sqlalchemy.orm import sessionmaker 
 
 #Logging for errors / outputs
-logging.basicConfig(filename=r'C:\Users\ --PATH-- \Logging\Errors.txt', level=logging.DEBUG,  format='%(asctime)s %(levelname)s %(name)s %(message)s')
+logging.basicConfig(filename=r'\PATH \Logging\Errors.txt', level=logging.DEBUG,  format='%(asctime)s %(levelname)s %(name)s %(message)s')
 logger=logging.getLogger(__name__) 
 
 stdoutOrigin=sys.stdout    ###---output to txt
-sys.stdout = open(r'C:\Users\ --PATH-- \Logging\Output.txt', 'a')
+sys.stdout = open(r'\PATH \Logging\Output.txt', 'a')
 
 ### Get date for tracking
-today1= date.today()   
-print('792_Flag_Start', today1)
+today= date.today()   
+print('792_Flag_Start', today)
 
+
+#----------------------------------------
 #Connect to DB via SQL Server
 conn = pyodbc.connect('Driver={SQL Server};'   
-                      'Server=SERVER;'           ##SERVER NAME
-                      'Database=DATABASE;'       ##DATABASE
+                      'Server=SERVER;'                 ##SERVER NAME
+                      'Database=DATABASE;'                     ##DATABASE
                       'Trusted_Connection=yes;')
 cursor = conn.cursor()
 
@@ -31,48 +33,86 @@ conn.autocommit = True
 
 #Check for database connection
 if (conn == False):
-    print("Connection HFW Error")
+    print("Connection DbRaw Error")
 else: 
-    print("Connection HFW Successful")
+    print("Connection DbRaw Successful")
     
 
     
 ###Connect to SQL Server
-con = sqlalchemy.create_engine('mssql:// -SERVER- / -DATABASE- ?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server',
+con = sqlalchemy.create_engine('mssql://SERVER/DATABASE?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server',
                                fast_executemany=True)    
 
 Session = sessionmaker(bind=con)
 session = Session()    
 
+#-------------------------------
+
 #Loading the .txt file
-df = pd.read_csv('// --PATH-- /Empire_32BJ_Flag792.txt' , sep=';' , header=0, index_col=False)
+df = pd.read_csv('PATH /Empire_32BJ_Flag792.txt' , sep=';' , header=0, index_col=False)
+
+#Old data
+#df1 = pd.read_csv('PATH /Empire_32BJ_Flag792_20221112.txt' , sep=';' , header=0, index_col=False)
 
 
+#---------------------
 #Fix spec4code column name. There is more WAAAAAAY over there --->                                                                                                                                  I swear. It IS over there --->                                                                                                                                                   Keep Going....                                                                                                                                 Almost there!                                           YAY!!
 df = df.rename({'SPEC4CODE                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               ':'SPEC4CODE'}, axis=1)
 
 ###add a date column that is empty
 df['Date_added'] = np.nan
 
+df['Date_added'] = pd.to_datetime(df['Date_added'])   #convert to proper type
+ 
+#df['Date_added'] = today    #add today's date for tracking 
+
+#---------------------------
+###create an ID column
+col = ['NPI', 'TAX', 'PROV-ID', 'LOCATION']    #PROV-ID & LOCATION = EPIN
+df['Flag792_ID'] = df[col].apply(lambda row: ''.join(row.values.astype(str)), axis=1)
+
+#reorder columns to better suit database 
+df = df[['Flag792_ID', 'Date_added', 'PROV-ID', 'LOCATION', 'NPI', 'TAX', 'LASTNAME', 'FIRSTNAME', 'MI','ORG NAME', 'ADDRESS1', 'ADDRESS2',
+         'CITY', 'STATE', 'ZIP', 'ZIP4', 'PHONE', 'DEGREE', 'GENDER', 'FAX', 'SPEC1CODE', 'SPEC2CODE', 'SPEC3CODE', 'SPEC4CODE']]
+
+#---------------------------
+
 
 ### Insert data into SQL Server
-print('Loading new 792 Flag Table data to SQL table')  # code to upload dataframe to SQL Server
+print('Loading new 792 Flag Table data to SQL archive table')  
 
-conn.commit()
-df.to_sql( '792_Provider_Flag', con, schema='SCHEMA', index=False, chunksize=100000, if_exists='replace')
+conn.commit()                 #code to upload dataframe to SQL Server
+df.to_sql( 'Provider792FlagArchive', con, schema='SCHEMA', index=False, chunksize=100000, if_exists='append')   
 
-print("New data loaded into 792 Flag Table") #
+print("New data loaded into 792 Flag Archive") 
 
+#-------------------------------------------------------------
+####Move file to tracking folder
 
-#Date loaded update statement 
-sql_query = pd.read_sql_query('''
- 	Update DATABASE.SCHEMA.[792_Provider_Flag]    ---add date loaded to 792_Provider_Flag
-		set [Date_added] = getdate()
-		where [Date_added] IS NULL;
-		''' ,conn)
+#Sourcing
+import datetime
+from datetime import date
 
+#Set Date domains to make files look neat & pretty
+today = datetime.date.today()
+dateset = today
+mon = str(dateset.month).rjust(2,'0')
+day = str(dateset.day).rjust(2,'0')
+yr = str(dateset.year)[0:]
 
+df.to_csv(r'PATH\Empire_32BJ_Flag792_'+yr+mon+day+'.csv', index=False)
+
+#------------------------------------------------------------
+
+#Run SP
+print("Running SP")
+itemISthere = conn.cursor()
+itemISthere.execute("schema.sp792_ProviderFlag")
+print("SP run successful")
+
+#----------------------------------------------------------
 conn.close()
 
-today= date.today()   
+
+## Finish update / upload 
 print('792_Update_Complete', today)
