@@ -1,10 +1,40 @@
 
+# -*- coding: utf-8 -*-
+"""
+	Process:		ETL BASE CODE
+	Author:			Casey Palmisano
+"""
+
+###basic load
 #sourcing
 import datetime
 
 #gen lib
 import pandas as pd
+import numpy as np
+from datetime import date
+import os
 import pyodbc
+import sys
+import logging
+import sqlalchemy
+from sqlalchemy.orm import sessionmaker 
+
+#---------- Logging and tracking
+
+
+#Logging for errors / outputs
+logging.basicConfig(filename=r'PATH \Logging\Errors.txt', level=logging.DEBUG,  format='%(asctime)s %(levelname)s %(name)s %(message)s')
+logger=logging.getLogger(__name__) 
+
+stdoutOrigin=sys.stdout    ###---output to txt
+sys.stdout = open(r'PATH \Logging\Output.txt', 'a')
+
+### Get date for tracking
+today= date.today()   
+print('Procedure_Start', today)    ################### Add correct name
+
+#-----------------------
 
 #Set Date domains to make files look neat & pretty
 today = datetime.date.today()
@@ -13,10 +43,12 @@ mon = str(dateset.month).rjust(2,'0')
 day = str(dateset.day).rjust(2,'0')
 yr = str(dateset.year)[2:]
 
+#-------------------
+
 #Connect to DB via SQL Server
 conn = pyodbc.connect('Driver={SQL Server};'   
-                      'Server=*****;'   ##SERVER NAME
-                      'Database=********;'  ##DATABASE
+                      'Server=SERVER;'   ##SERVER NAME
+                      'Database=DATABASE;'  ##DATABASE
                       'Trusted_Connection=yes;')
 cursor = conn.cursor()
 
@@ -26,20 +58,70 @@ conn.autocommit = True
 
 #Check for database connection
 if (conn == False):
-    print("Connection Error")
+    print("Connection Database Error")
 else: 
-    print("Connection Success")
+    print("Connection Database Successful")
 
 
-#####Pull data into yearly CSV files
-##2018##
+### Engine creation 
+con = sqlalchemy.create_engine('mssql://SERVER/DATABASE?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server',   ### Have correct Database
+                               fast_executemany=True)    
+
+Session = sessionmaker(bind=con)
+session = Session()    
+
+##----------------
+
+#Loading the  file
+df = pd.read_csv('//PATH /Empire_32BJ_Flag792.txt' , sep=';' , header=0, index_col=False)
+
+#---------------------------
+
+### Insert data into SQL Server
+print('Loading new  Table data to SQL archive table')  
+
+conn.commit()                 #code to upload dataframe to SQL Server
+df.to_sql( 'Table_name', con, schema='Schema_name', index=False, chunksize=100000, if_exists='replace')   
+
+print("New data loaded into Table") 
+
+#-------------------------------------------------------------
+
+####Move file to tracking folder
+
+#Sourcing
+import datetime
+from datetime import date
+
+#Set Date domains to make files look neat & pretty
+today = datetime.date.today()
+dateset = today
+mon = str(dateset.month).rjust(2,'0')
+day = str(dateset.day).rjust(2,'0')
+yr = str(dateset.year)[0:]
+
+df.to_csv(r'PATH \Empire_32BJ_Flag792_'+yr+mon+day+'.csv', index=False)
+
+#-----------------------------------------------------------
+
+
+#####Run SQL query
 sql_query18 = pd.read_sql_query('''
-        SELECT * FROM [DATABASE].[SCHEMA].[TABLE]
+        SELECT * FROM [DATABASE].[SCHEMA].[TABLE_DATA]
 		WHERE (service_date)>= '2018-01-01' 
 		and (service_date)<= '2018-12-31'
 		''' ,conn)
         
-  
-#Run Query and download to local with date of load  
+        
+#---------------- Take query results and input into a CSV file        
+        
 df = pd.DataFrame(sql_query18)
-df.to_csv( r'C:\ PATH  \Test_Folder\MSHS_'+mon+day+yr+'_2018.csv', index = False )
+df.to_csv( r'PATH \NAME_'+mon+day+yr+'_2018.csv', index = False )
+
+#----------------------------------------------------------
+conn.close()    #close connection 
+con.close()     #close connection 
+session.close() #close connection
+
+## Finish update / upload 
+print('792_Update_Complete', today)
