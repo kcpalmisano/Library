@@ -1,0 +1,72 @@
+-------------------SP START-----------------------------
+
+
+-----Initial update of date for first load
+--Update SCHEMA.[792_ProviderFlagArchive]
+--SET Date_added = getdate() 
+--where Date_added IS NULL
+
+
+---------Add a new ModifiedDate column
+--Alter Table DATABASE.SCHEMA.[Provider792FlagArchive]
+--add ModifiedDate datetime
+
+---------Add a new DateRemoved column
+--Alter Table DATABASE.SCHEMA.[New_792_Provider_Flag]
+--add DateRemoved date
+	
+--------Create trigger for Table to update ModifiedDate
+--CREATE TRIGGER trg_792PF_UpdateModifiedDate
+--ON SCHEMA.[New_792_Provider_Flag]
+--AFTER UPDATE
+--AS
+--UPDATE SCHEMA.[New_792_Provider_Flag]
+--SET ModifiedDate = CURRENT_TIMESTAMP
+
+	
+--------Create trigger for Archive to update DateAdded
+--CREATE TRIGGER trg_792PFA_UpdateDateAdded
+--ON DATABASE.SCHEMA.[Provider792FlagArchive]
+--AFTER UPDATE
+--AS
+--UPDATE DATABASE.SCHEMA.[Provider792FlagArchive]
+--SET Date_added = getdate()
+
+
+Drop table if exists #792Removed;
+
+---removed 792 providers from prod table based on newest report from Empire into temp table
+SELECT distinct *
+INTO #792Removed
+from  DATABASE.SCHEMA.[New_792_Provider_Flag] c 
+where NOT EXISTS (select Flag792_ID 
+						FROM dbraw.Empire.[Provider792FlagArchive] d
+						where d.Flag792_ID = c.Flag792_ID) ;
+			
+			
+--Insert any new providers from Empire report into prod table 
+
+INSERT INTO DATABASE.SCHEMA.[New_792_Provider_Flag]
+SELECT distinct a.* , Cast (NULL as datetime) as ModifiedDate, Cast (NULL as date) as DateRemoved
+--into DATABASE.SCHEMA.[New_792_Provider_Flag]   ---#792Added
+from DATABASE.SCHEMA.[Provider792FlagArchive] a
+where NOT EXISTS (select Flag792_ID 
+						FROM DATABASE.SCHEMA.[New_792_Provider_Flag] b
+						where b.Flag792_ID = a.Flag792_ID 
+						or b.DateRemoved is NOT NULL); --need to check with updates if this works
+	
+	
+	---update Date_added as today's date for newly added providers
+	Update DATABASE.SCHEMA.[New_792_Provider_Flag]
+	SET Date_added  = getdate() 
+	where Date_added IS NULL;
+
+
+	---update DateRemoved as today's date for those providers that are no longer in report
+	Update Pflag 
+	SET DateRemoved = getdate() 
+		from DATABASE.SCHEMA.[New_792_Provider_Flag] pflag 
+		Inner join #792Removed rem
+		On Pflag.Flag792_ID = rem.Flag792_ID
+		where pflag.DateRemoved IS NULL;
+
