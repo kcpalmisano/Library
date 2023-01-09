@@ -85,7 +85,29 @@ df['Client Share $']=df['Client Share $'].replace('-',np.nan)
 
 
 #adjust column names to correct naming convention 
-df = df.rename({'Submit Year Month':'Submit_Year_Month', 'Carrier ID':'Carrier_ID', 'Carrier Name':'Carrier_Name', 'Account ID':'Account_ID', 'Account Name':'Account_Name', 'Group ID':'Group_Id', 'Group Name':'Group_Name', 'Disb Custom Category':'Disb_Custom_Category', 'Claim Type':'Claim_Type', 'Disb Brand Class':'Disb_Brand_Class', 'Guarantee Rx':'Guarantee_Rx', 'Guarantee Rx Rate $':'Guarantee_Rx_Rate_Amt', 'Guarantee $':'Guarantee_Amt', 'Rebateable Rx':'Rebateable_Rx', 'Billed $':'Billed_Amt', 'Factored Billed Client Share %':'Factored_Billed_Client_Share_Pct', 'Factored Billed Client Share $':'Factored_Billed_Client_Share_Amt', 'Collected $':'Collected_Amt', 'Client Share %':'Client_Share_Pct', 'Client Share $':'Client_Share_Amt', 'Total Due $':'Total_Due_Amt', 'Paid Previously $':'Paid_Previously_Amt', 'Current Paid $':'Current_Paid_Amt'}, axis=1)
+df = df.rename({'Submit Year Month':'Submit_Year_Month',
+	'Carrier ID':'Carrier_ID',
+	'Carrier Name':'Carrier_Name',
+	'Account ID':'Account_ID',
+	'Account Name':'Account_Name',
+	'Group ID':'Group_Id',
+	'Group Name':'Group_Name',
+	'Disb Custom Category':'Disb_Custom_Category',
+	'Claim Type':'Claim_Type',
+	'Disb Brand Class':'Disb_Brand_Class',
+	'Guarantee Rx':'Guarantee_Rx',
+	'Guarantee Rx Rate $':'Guarantee_Rx_Rate_Amt',
+	'Guarantee $':'Guarantee_Amt',
+	'Rebateable Rx':'Rebateable_Rx',
+	'Billed $':'Billed_Amt',
+	'Factored Billed Client Share %':'Factored_Billed_Client_Share_Pct',
+	'Factored Billed Client Share $':'Factored_Billed_Client_Share_Amt',
+	'Collected $':'Collected_Amt', 'Client Share %':'Client_Share_Pct',
+	'Client Share $':'Client_Share_Amt',
+	'Total Due $':'Total_Due_Amt',
+	'Paid Previously $':'Paid_Previously_Amt',
+	'Current Paid $':'Current_Paid_Amt'},
+		axis=1)
 
 ###Just in case
 #Download to local file
