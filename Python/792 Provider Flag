@@ -49,10 +49,10 @@ session = Session()
 #-------------------------------
 
 #Loading the .txt file
-df = pd.read_csv('PATH /Empire_32BJ_Flag792.txt' , sep=';' , header=0, index_col=False)
+df = pd.read_csv('PATH /Empire_Flag792.txt' , sep=';' , header=0, index_col=False)
 
 #Old data
-#df1 = pd.read_csv('PATH /Empire_32BJ_Flag792_20221112.txt' , sep=';' , header=0, index_col=False)
+#df1 = pd.read_csv('PATH /Empire_Flag792_20221112.txt' , sep=';' , header=0, index_col=False)
 
 
 #---------------------
@@ -100,7 +100,7 @@ mon = str(dateset.month).rjust(2,'0')
 day = str(dateset.day).rjust(2,'0')
 yr = str(dateset.year)[0:]
 
-df.to_csv(r'PATH\Empire_32BJ_Flag792_'+yr+mon+day+'.csv', index=False)
+df.to_csv(r'PATH\Empire_Flag792_'+yr+mon+day+'.csv', index=False)
 
 #------------------------------------------------------------
 
@@ -115,4 +115,4 @@ conn.close()
 
 
 ## Finish update / upload 
-print('792_Update_Complete', today)
+print('792 Update Complete', today)
