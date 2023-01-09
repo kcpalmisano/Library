@@ -11,7 +11,7 @@ dd_map = pd.read_excel('//PATH TO  /Data Dictionaries.xlsx',
                            sheet_name = 'Empire')   
 
 #Only read in selected columns 
-use_cols = ['32BJ-CLM-ID','32BJ-LN-ID','32BJ-CLM-ADJ-NO','32BJ-SERV-UNT-NO','SURPRISE_BILLING','QPA_AMOUNT']
+use_cols = ['CLM-ID','LN-ID','CLM-ADJ-NO','SERV-UNT-NO','SURPRISE_BILLING','QPA_AMOUNT']
 dd_map = dd_map[dd_map['Empire Field Name'].isin(use_cols)].reset_index(drop=True)
 start_pos = dd_map['Start Position']
 end_pos = dd_map['End Position']
@@ -25,9 +25,9 @@ for i in range(len(dd_map)):
     fields.append(field)
 
 ##find the files in the range 
-daily_file_dir = '//PATH /Daily Claims Files/WGS/'
+daily_file_dir = '//PATH /Daily_Claims_Files/WGS/'
 files = [daily_file_dir + x for x in os.listdir(daily_file_dir) if datetime.datetime.strptime(x[55:63], '%Y%m%d') >= datetime.datetime(2022,5,27) and '.out' in x]
-monthly_file_dir = '// PATH /Monthly Claims Files/WGS/'
+monthly_file_dir = '// PATH /Monthly_Claims_Files/WGS/'
 files.extend([monthly_file_dir + x for x in os.listdir(monthly_file_dir) if datetime.datetime.strptime(x[73:81], '%Y%m%d') >= datetime.datetime(2022,5,27) and '.out' in x])
 
 #create empty DF
@@ -75,7 +75,7 @@ session = Session()
 df = pd.DataFrame(df_out) 
 
 
-col = ['32BJ-CLM-ID', 'QPA_AMOUNT', '32BJ-SERV-UNT-NO', '32BJ-CLM-ADJ-NO', '32BJ-LN-ID']
+col = ['CLM-ID', 'QPA_AMOUNT', 'SERV-UNT-NO', 'CLM-ADJ-NO', 'LN-ID']
 df['SB_ID'] = df[col].apply(lambda row: '_'.join(row.values.astype(str)), axis=1)
 
 
