@@ -73,7 +73,7 @@ session = Session()
 ##----------------
 
 #Loading the  file
-df = pd.read_csv('//PATH /Empire_32BJ_Flag792.txt' , sep=';' , header=0, index_col=False)
+df = pd.read_csv('//PATH /Empire_Flag792.txt' , sep=';' , header=0, index_col=False)
 
 #---------------------------
 
