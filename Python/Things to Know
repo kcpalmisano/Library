@@ -8,7 +8,7 @@ import numpy as np
 import seaborn as sns
 
 
-df = pd.read_csv(r'C:/Users/cpalmisano/Desktop/Empire_MRF/Empire/InNetwork_Rates/32BJ_NJ_36BO_in-network-rates.csv')
+df = pd.read_csv(r'C:/Users/cpalmisano/Desktop/Empire_MRF/Empire/InNetwork_Rates/NJ_36BO_in-network-rates.csv')
 
 
 #Understanding my variables
