@@ -16,10 +16,10 @@ BEGIN
 --- Create temp table with raw data from Surprisebill_raw 
 DROP table IF EXISTS #test_surprise;
 
-select [32BJ-CLM-ID] as claimNr       --Correct names and table to work with
- , [32BJ-LN-ID] as line_id  
- , [32BJ-CLM-ADJ-NO] as claim_adj_num  
- , [32BJ-SERV-UNT-NO] as serv_unit_num  
+select [CLM-ID] as claimNr       --Correct names and table to work with
+ , [LN-ID] as line_id  
+ , [CLM-ADJ-NO] as claim_adj_num  
+ , [SERV-UNT-NO] as serv_unit_num  
  , [SURPRISE_BILLING] as surprise_billing  
  , [QPA_AMOUNT]  as qpa_amount    
  into #test_surprise
