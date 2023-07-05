@@ -1,61 +1,147 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Sep 16 09:24:06 2022
+@author: cpalmisano
+"""
 
 import pandas as pd
 import numpy as np
+import datetime
 from datetime import date
-import os
 import pyodbc
-import sys
-import logging
+import gc
+import inspect
 import sqlalchemy
 from sqlalchemy.orm import sessionmaker 
 
-#Logging for errors / outputs
-logging.basicConfig(filename=r'\PATH \Logging\Errors.txt', level=logging.DEBUG,  format='%(asctime)s %(levelname)s %(name)s %(message)s')
-logger=logging.getLogger(__name__) 
 
-stdoutOrigin=sys.stdout    ###---output to txt
-sys.stdout = open(r'\PATH \Logging\Output.txt', 'a')
 
-### Get date for tracking
-today= date.today()   
-print('792_Flag_Start', today)
+#Set Date domains to make files look neat & pretty
+today = datetime.date.today()
+dateset = today
+mon = str(dateset.month).rjust(2,'0')
+day = str(dateset.day).rjust(2,'0')
+yr = str(dateset.year)[0:]
 
+
+def close_all_connections():
+    """
+    This function will close all open connections
+    """
+    for obj in gc.get_objects():
+        if inspect.ismodule(obj):
+            for name in dir(obj):
+                if name == "engine":
+                    engine = getattr(obj, name)
+                    if isinstance(engine, sqlalchemy.engine.Engine):
+                        engine.dispose()
+                elif name == "conn":
+                    conn = getattr(obj, name)
+                    if conn is not None and isinstance(conn, pyodbc.Connection):
+                        try:
+                            conn.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+                elif name == "con":
+                    con = getattr(obj, name)
+                    if con is not None and isinstance(con, pyodbc.Connection):
+                        try:
+                            con.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+                elif name == "cursor":
+                    cursor = getattr(obj, name)
+                    if cursor is not None and isinstance(cursor, pyodbc.Cursor):
+                        try:
+                            cursor.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+        
+
+
+def execute_stored_procedure(conn_str, sp_name):
+    try:
+        con = pyodbc.connect(conn_str)
+        cursor = con.cursor()
+        cursor.execute(f"EXECUTE {sp_name}")
+        con.commit()
+        return True
+    except:
+        return False
+    finally:
+        if 'con' in locals() and con is not None:
+            close_all_connections()
+        
+
+
+def main():
+    # Connect to SQL Server
+    conn_str = 'Driver={SQL Server};' \
+               'Server=32BJHFSQL1A;' \
+               'Database=DbHfProd;' \
+               'Trusted_Connection=yes;'
+    
+    
+    # Execute stored procedure
+    sp_name = 'Empire.sp792_ProviderFlag'
+    success = execute_stored_procedure(conn_str, sp_name)
+    if success:
+        print('Stored procedure executed successfully!')
+    else:
+        print('Stored procedure failed to execute.')
 
 #----------------------------------------
+
 #Connect to DB via SQL Server
 conn = pyodbc.connect('Driver={SQL Server};'   
-                      'Server=SERVER;'                 ##SERVER NAME
-                      'Database=DATABASE;'                     ##DATABASE
+                      'Server=SERVER;'   ##SERVER NAME
+                      'Database=DATABASE;'       ##DATABASE
                       'Trusted_Connection=yes;')
-cursor = conn.cursor()
-
 conn.autocommit = True
 
-#Check for database connection
-if (conn == False):
-    print("Connection DbRaw Error")
-else: 
-    print("Connection DbRaw Successful")
-    
 
-    
 ###Connect to SQL Server
-con = sqlalchemy.create_engine('mssql://SERVER/DATABASE?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server',
-                               fast_executemany=True)    
-
+con = sqlalchemy.create_engine('mssql://SERVER/DATABASE?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server', fast_executemany=True)    
 Session = sessionmaker(bind=con)
 session = Session()    
 
-#-------------------------------
-
-#Loading the .txt file
-df = pd.read_csv('PATH /Empire_Flag792.txt' , sep=';' , header=0, index_col=False)
-
-#Old data
-#df1 = pd.read_csv('PATH /Empire_Flag792_20221112.txt' , sep=';' , header=0, index_col=False)
-
 
 #---------------------
+###Old file load for On Ramp
+# df = pd.read_csv('//SERVER//SERVER_NAME//CopyOfIncomingFiles//Empire//Provider Flag Reports//792_Flag//Empire_32BJ_Flag792_20230403.csv')
+
+
+##Loading the weekly .txt file
+df = pd.read_csv('//SERVER/SERVER_NAME/Empire/Empire Provider Flag Reports/Empire_32BJ_Flag792.txt' , sep=';' , header=None, index_col=False)
+
+
+#Move raw file to folder for archival 
+try: 
+    df.to_csv(r'\\32BJHFSQL1A\Health_Fund\CopyOfIncomingFiles\Empire\Provider Flag Reports\792_Flag\Raw792File\RAWEmpire_32BJ_Flag792_'+yr+mon+day+'.csv', index=False)
+    print('written WithOUT hardcode')
+    
+except OSError:
+    df.to_csv(r'S:\CopyOfIncomingFiles\Empire\Provider Flag Reports\792_Flag\Raw792File\Empire_32BJ_Flag792_'+yr+mon+day+'.csv', index=False)
+    print('written WITH hardcode')
+
+#-------------------------------
+
+
+#### New Format? PROVIDER has updated their file and not provided a data dictionary YET 7/1/2023
+####'0':'PROV-ID',	LOCATION	1:NPI	2:TAX	3:LASTNAME	4:FIRSTNAME	5:MI	6:ORG NAME	7:ADDRESS1	8:ADDRESS2	9:CITY	10:STATE	11:ZIP	12:ZIP4	 13:PHONE	14:DEGREE	15:GENDER	16:FAX	17:SPEC1CODE	18:SPEC2CODE	19:SPEC3CODE	20:SPEC4CODE	
+new_column_names = ['PROV-ID', 'NPI', 'TAX', 'LASTNAME', 'FIRSTNAME', 'MI', 'ORG NAME', 'ADDRESS1', 'ADDRESS2', 'CITY', 'STATE', 'ZIP', 'ZIP4', 'PHONE', 'DEGREE', 'GENDER', 'FAX', 'SPEC1CODE', 'SPEC2CODE', 'SPEC3CODE', 'SPEC4CODE', '21', '22']
+df.columns = new_column_names
+
+
+
+
+
+
+
+
+
+#-------------------------------
+
 #Fix spec4code column name. There is more WAAAAAAY over there --->                                                                                                                                  I swear. It IS over there --->                                                                                                                                                   Keep Going....                                                                                                                                 Almost there!                                           YAY!!
 df = df.rename({'SPEC4CODE                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               ':'SPEC4CODE'}, axis=1)
 
@@ -82,36 +168,26 @@ df = df[['Flag792_ID', 'Date_added', 'PROV-ID', 'LOCATION', 'NPI', 'TAX', 'LASTN
 print('Loading new 792 Flag Table data to SQL archive table')  
 
 conn.commit()                 #code to upload dataframe to SQL Server
-df.to_sql( 'Provider792FlagArchive', con, schema='SCHEMA', index=False, chunksize=100000, if_exists='append')   
+df.to_sql( 'Provider792FlagArchive', con, schema='Empire', index=False, chunksize=1000, if_exists='replace')   
 
 print("New data loaded into 792 Flag Archive") 
 
 #-------------------------------------------------------------
 ####Move file to tracking folder
 
-#Sourcing
-import datetime
-from datetime import date
+try: 
+    df.to_csv(r'\\SERVER\Health_Fund\CopyOfIncomingFiles\Empire\Provider Flag Reports\792_Flag\Empire_32BJ_Flag792_'+yr+mon+day+'.csv', index=False)
+    print('written WithOUT hardcode')
+    
+except OSError:
+    df.to_csv(r'SERVER:\SERVER_NAME\Empire\Provider Flag Reports\792_Flag\Empire_32BJ_Flag792_'+yr+mon+day+'.csv', index=False)
+    print('written WITH hardcode')
 
-#Set Date domains to make files look neat & pretty
-today = datetime.date.today()
-dateset = today
-mon = str(dateset.month).rjust(2,'0')
-day = str(dateset.day).rjust(2,'0')
-yr = str(dateset.year)[0:]
-
-df.to_csv(r'PATH\Empire_Flag792_'+yr+mon+day+'.csv', index=False)
-
-#------------------------------------------------------------
-
-#Run SP
-print("Running SP")
-itemISthere = conn.cursor()
-itemISthere.execute("schema.sp792_ProviderFlag")
-print("SP run successful")
-
-#----------------------------------------------------------
-conn.close()
+#----------------------------------------
+#### Run stored procedure and close all connections
+      
+if __name__ == '__main__':
+    main()   
 
 
 ## Finish update / upload 
