@@ -1,335 +1,1113 @@
+GO
+/****** Object:  StoredProcedure [Empire].[Sp_ClaimsMoosh]    
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 
-use Health_Fund_Working;
+-- =============================================
+-- Author:		<SQL = Casey P> <Python = Mitch O>
+-- Create date: <01/09/2023> haha (Sept 2022? 
+-- Description:	This is The Moosh. This takes all claims data and selects the most complete recent information and puts it into <TABLE SOURCE NAME>.  Then takes the most complete information and brings 
+-- it into <TABLE NAME FLAT> to have the most recent claim number, adjustment, and all associated claim lines with it. 
+-- Change History: Where do I even start...
+-- =============================================
+ALTER PROCEDURE [Empire].[Sp_ClaimsMoosh] 
+(
+       @JobDescription                   varchar(100)  = null,
+       @PeriodFrom                       date          = null,
+       @PeriodTo                         date          = null,
+       @FileName                         varchar(125)  = null,
+       @DebugFlag                        int           = 0
+)
+as
+begin
+begin try
 
---Select Distinct top 4 JobId 
---into #Jobidlast
---from SCHEMA.ClaimsSource_TEST
---Order by JobID DESC    -----dependent on 2.0 final input table name  ----run the last four jobs as a back up
+
+       -- Do not return the count of rows;
+       set nocount on;
+
+       -- Declare and initialize variables.
+       declare
+              @DatetimeStamp                    datetime = getdate(),
+              @spName                           varchar(100) = 'Da Moosh',
+              @JobId                            int,
+              @NrRowsInserted                   int;
+
+       -- Set default values for parameters.
+       select
+              @PeriodFrom = case when @PeriodFrom is null then @DatetimeStamp else @PeriodFrom end,
+              @PeriodTo = case when @PeriodTo is null then @DatetimeStamp else @PeriodTo end;
+
+       --
+       -- Check if the ETL job was already run for the same file(s).
+       --
+       if exists
+       (
+              select 1
+              from Main.Jobs
+              where
+                     JobType = 'ClaimsMoosh Stored Procedure' and
+                     JobDescription = @JobDescription and
+                     PeriodFrom = @PeriodFrom and
+                     PeriodTo = @PeriodTo       -- Job migh have not finished.
+       )
+       begin
+              return;
+       end;
+
+       -- Record job start.
+       insert into Main.Jobs 
+       (
+              --JobId identity(1, 1),
+              JobType,
+              JobStart,
+              JobEnd,
+              PeriodFrom,
+              PeriodTo,
+              JobDescription,
+              FileName             
+       )
+       values
+       (
+              @spName,
+              @DatetimeStamp,
+              null,
+              @PeriodFrom,
+              @PeriodTo,
+              @JobDescription,
+              @FileName
+       );
+
+       select 
+              @JobId = scope_identity();
+
+
+/***************************************************************************************************************************************/
+
+
+------------------ ON RAMP ------------------------v\
+/*
+drop table if exists #OnRamp;
+Select distinct HfClaimId, JobId
+	INTO #OnRamp
+ from Empire.ClaimsSource_TEST
+--		where JobId = 13148
+		where JobId IN 
+(13288,13304) ;
 
 
 drop table if exists #claimstest;
--- have filetype (CS90 & WGS) and FileName (daily & monthly) brought in to establish differences in listed 
-select distinct  a.*, b.FileType, b.[FileName]
+
+select distinct   c.*, b.FileType, b.[FileName]
+	INTO #claimstest
+ from #OnRamp a
+	LEFT JOIN Empire.ClaimsSource_TEST c
+		on c.HfClaimID = a.HfClaimID 
+	LEFT JOIN Main.Jobs b
+		on a.Jobid = b.JobId;
+		*/
+-----------------------------------------------------^
+
+
+-----------------------------------------------------------START Table Prep-----v
+
+-----------SKIP if ON RAMP-------------------------v
+drop table if exists #claimstest;
+----run the last Three jobs as a back up for long weekend or outage 
+WITH Jobidlast AS (
+    SELECT DISTINCT TOP 3 JobId
+    FROM Empire.ClaimsSource_TEST
+    ORDER BY JobID DESC
+),
+hfclaimid AS (
+    SELECT DISTINCT cs.HfClaimId
+    FROM Empire.ClaimsSource_TEST cs
+    INNER JOIN Jobidlast jl ON jl.JobId = cs.JobId
+)
+SELECT DISTINCT a.*, b.FileType, b.[FileName]
 INTO #claimstest
-from SCHEMA.claimsSource_Test a
-LEFT JOIN SCHEMA.Jobs b
-on a.JobId = b.jobid
---where a.JobId >= (select MIN(JobId) from #Jobidlast) -----dependent on 2.0 final input table name  ----run the last four jobs as a back up
-;    
+FROM Empire.ClaimsSource_Test a
+INNER JOIN hfclaimid hfc ON hfc.HfClaimId = a.HfClaimId
+LEFT JOIN Main.Jobs b ON a.JobId = b.JobId;
 
+---------------------------------------------------^			
 
---START
+----------------------------------------------------------START 'Moosh'-------v
 ----Establish 1st table
-
+				
 Drop table if exists #temp1;   
 --establish max prices and updating/changing fields
+
 select distinct  a.ClaimNr, a.claimlinenr, a.ClaimAdjustmentNr,
-	CASE WHEN filetype = 'WGS' OR (len([FileName]) > 82) THEN MAX(a.ClaimChargedAmount) END as Total_ClaimChargedAmount,  --len for CS90 monthly files needing a max not a sum for the amounts
+	CASE WHEN filetype = 'WGS' OR (len([FileName]) > 82) THEN MAX(a.ClaimChargedAmount) ELSE Sum(a.ClaimChargedAmount) END as Total_ClaimChargedAmount,  --len for CS90 monthly files needing a max not a sum for the amounts
 	CASE WHEN filetype = 'WGS' OR (len([FileName]) > 82) THEN MAX(a.ClaimLineChargedAmount) ELSE Sum(a.ClaimLineChargedAmount) END as Total_ClaimLineChargedAmount,  --len for CS90 monthly files needing a max not a sum for the amounts
 	CASE WHEN filetype = 'WGS' OR (len([FileName]) > 82) THEN MAX(a.BilledServiceUnitCount) ELSE Sum(a.BilledServiceUnitCount) END as Total_BilledServiceUnitCount,  --len for CS90 monthly files needing a max not a sum for the amounts
-MAX(a.ClaimPaidAmount) as Total_ClaimPaidAmount,				
-MAX(a.ClaimLinePaidAmount) as Total_ClaimLinePaidAmount,		
-MAX(a.PaidServiceUnitCount) as Total_PaidServiceUnitCount,		
-MAX(a.CopayAmount) as Total_CopayAmount,						
-MAX(a.CoinsuranceAmount)	as Total_CoinsuranceAmount,			
-MAX(a.DeductibleAmount) as Total_DeductibleAmount,	
+	Max(a.HfClaimId) as HfClaimID,
+	MAX(a.ClaimPaidAmount) as Total_ClaimPaidAmount,				
+	MAX(a.ClaimLinePaidAmount) as Total_ClaimLinePaidAmount,		
+	MAX(a.PaidServiceUnitCount) as Total_PaidServiceUnitCount,		
+	MAX(a.CopayAmount) as Total_CopayAmount,						
+	MAX(a.CoinsuranceAmount)	as Total_CoinsuranceAmount,			
+	MAX(a.DeductibleAmount) as Total_DeductibleAmount,				
+	MAX(a.ApprovedAmount)	 as Total_ApprovedAmount,				
+	MAX(a.MemberPenaltyAmount) as Total_MemberPenaltyAmount,		
+	MAX(a.CoveredExpenseAmount) as Total_CoveredExpenseAmount,		
+	MAX(a.AuthorizationNr) as AuthorizationNr,
+	MAX(a.ServiceEndDate) as ServiceEndDate,
+	max(a.JobId) as MostRecentJobID,
+	max(a.patientSSN) as PatientSSN, 
+	Max(a.dependentNr) as DependentNr, 
+	MAX(a.Person_ID) as Person_Id,
+	MAX(a.MemberRelationshipCode) as MemberRelationshipCode,
+	Max(a.RenderingName) as RenderingName, 
+	Max(a.RenderingAddress1) as RenderingAddress1, 
+	Max(a.RenderingAddress2) as RenderingAddress2, 
+	Max(a.RenderingCity) as RenderingCity, 
+	Max(a.RenderingState) as RenderingState, 
+	Max(a.RenderingZipCode) as RenderingZipCode, 
+	Max(a.RenderingZipCode4) as RenderingZipCode4,
+	Max(a.BillingAddress1) as BillingAddress1, 
+	Max(a.BillingAddress2) as BillingAddress2, 
+	Max(a.BillingCity) as BillingCity, 
+	Max(a.BillingState) as BillingState, 
+	Max(a.BillingZipCode) as BillingZipCode, 
+	Max(a.BillingZipCode4) as BillingZipCode4 , 
+	Max(a.EPIN) as EPIN, 
+	Max(a.CountyCode) as CountyCode, 
+	Max(a.PatientDOB) as PatientDOB, 
+	Max(a.HealthCardId) as HealthCardId, 
+	Max(a.RenderingNPI) as RenderingNPI,
+	Max(a.PatientName) as PatientName, 
+	Max(a.PatientGender) as PatientGender, 
+	Max(a.GroupNr) as GroupNr,    ---65
+	Max(a.SubgroupNr) as SubgroupNr, 
+	Max(a.MemberSSN) as MemberSSN, 
+	Max(a.MemberName) as MemberName,
+	 ClaimLineStatusCode, 
+	Max(a.BillingTaxId) as BillingTaxId, 
+	Max(a.ServiceRenderingType) as ServiceRenderingType,
+	Max(a.AdmitDate) as AdmitDate, 
+	Max(a.DischargeDate) as DischargeDate,
+	Max(a.FileType) as FileType,
+	Max(a.PaidDate) as PaidDate, 
+	Max(a.InvestigationClaimCode) as InvestigationClaimCode, 
+	Max(a.HCPCS_Modifier1) as HCPCS_Modifier1, 
+	Max(a.HCPCS_Modifier2) as HCPCS_Modifier2,
+	Max(a.HCPCS_Modifier3) as HCPCS_Modifier3,
+	Max(a.HCPCS_Modifier4) as HCPCS_Modifier4,
+	Max(a.Deceased) as Deceased, 
+	Max(a.BilledServiceUnitCount) as BilledServiceUnitCount, 
+	Max(a.RenderingTaxId) as RenderingTaxId, 
+	Max(a.ClaimChargedAmount) as ClaimChargedAmount, 
+	Max(a.ClaimPaidAmount) as ClaimPaidAmount,    
+	Max(a.DiagnosisCodeAdmit) as DiagnosisCodeAdmit,
+	Max(a.DiagnosisCodeAdmitPOA) as DiagnosisCodeAdmitPOA, 
+	Max(a.DiagnosisCodePrinciple) as DiagnosisCodePrinciple, 
+	Max(a.DiagnosisCodePrinciplePOA) as DiagnosisCodePrinciplePOA, 
+	Max(a.DiagnosisCode1) as DiagnosisCode1, 
+	Max(a.DiagnosisCode1POA) as DiagnosisCode1POA,
+	Max(a.DiagnosisCode2) as DiagnosisCode2, 
+	Max(a.DiagnosisCode2POA) as DiagnosisCode2POA, 
+	Max(a.DiagnosisCode3) as DiagnosisCode3, 
+	Max(a.DiagnosisCode3POA) as DiagnosisCode3POA, 
+	Max(a.DiagnosisCode4) as DiagnosisCode4, 
+	Max(a.DiagnosisCode4POA) as DiagnosisCode4POA, 
+	Max(a.DiagnosisCode5) as DiagnosisCode5, 
+	Max(a.DiagnosisCode5POA) as DiagnosisCode5POA, 
+	Max(a.DiagnosisCode6) as DiagnosisCode6, 
+	Max(a.DiagnosisCode6POA) as DiagnosisCode6POA, 
+	Max(a.DiagnosisCode7) as DiagnosisCode7, 
+	Max(a.DiagnosisCode7POA) as DiagnosisCode7POA, 
+	Max(a.DiagnosisCode8) as DiagnosisCode8, 
+	Max(a.DiagnosisCode8POA) as DiagnosisCode8POA, 
+	Max(a.DiagnosisCode9) as DiagnosisCode9, 
+	Max(a.DiagnosisCode9POA) as DiagnosisCode9POA, 
+	Max(a.DiagnosisCode10) as DiagnosisCode10, 
+	Max(a.DiagnosisCode10POA) as DiagnosisCode10POA, 
+	Max(a.DiagnosisCode11) as DiagnosisCode11, 
+	Max(a.DiagnosisCode11POA) as DiagnosisCode11POA, 
+	Max(a.DiagnosisCode12) as DiagnosisCode12, 
+	Max(a.DiagnosisCode12POA) as DiagnosisCode12POA, 
+	Max(a.DiagnosisCode13) as DiagnosisCode13, 
+	Max(a.DiagnosisCode13POA) as DiagnosisCode13POA, 
+	Max(a.DiagnosisCode14) as DiagnosisCode14, 
+	Max(a.DiagnosisCode14POA) as DiagnosisCode14POA, 
+	Max(a.DiagnosisCode15) as DiagnosisCode15, 
+	Max(a.DiagnosisCode15POA) as DiagnosisCode15POA, 
+	Max(a.DiagnosisCode16) as DiagnosisCode16, 
+	Max(a.DiagnosisCode16POA) as DiagnosisCode16POA, 
+	Max(a.DiagnosisCode17) as DiagnosisCode17, 
+	Max(a.DiagnosisCode17POA) as DiagnosisCode17POA, 
+	Max(a.DiagnosisCode18) as DiagnosisCode18, 
+	Max(a.DiagnosisCode18POA) as DiagnosisCode18POA, 
+	Max(a.DiagnosisCode19) as DiagnosisCode19, 
+	Max(a.DiagnosisCode19POA) as DiagnosisCode19POA, 
+	Max(a.DiagnosisCode20) as DiagnosisCode20, 
+	Max(a.DiagnosisCode20POA) as DiagnosisCode20POA, 
+	Max(a.DiagnosisCode21) as DiagnosisCode21, 
+	Max(a.DiagnosisCode21POA) as DiagnosisCode21POA, 
+	Max(a.DiagnosisCode22) as DiagnosisCode22, 
+	Max(a.DiagnosisCode22POA) as DiagnosisCode22POA, 
+	Max(a.DiagnosisCode23) as DiagnosisCode23, 
+	Max(a.DiagnosisCode23POA) as DiagnosisCode23POA,  
+	Max(a.DiagnosisCode24) as DiagnosisCode24, 
+	Max(a.DiagnosisCode24POA) as DiagnosisCode24POA, 
+	Max(a.DiagnosisCode25) as DiagnosisCode25, 
+	Max(a.DiagnosisCode25POA) as DiagnosisCode25POA, 
+	Max(a.ProcedureCodeSurgical) as ProcedureCodeSurgical, 
+	Max(a.ProcedureCode1) as ProcedureCode1,
+	Max(a.ProcedureCode2) as ProcedureCode2,
+	Max(a.ProcedureCode3) as ProcedureCode3,
+	Max(a.ProcedureCode4) as ProcedureCode4,
+	Max(a.ProcedureCode5) as ProcedureCode5,
+	Max(a.ProcedureCode6) as ProcedureCode6,
+	Max(a.ProcedureCode7) as ProcedureCode7,
+	Max(a.ProcedureCode8) as ProcedureCode8,
+	Max(a.ProcedureCode9) as ProcedureCode9,
+	Max(a.ProcedureCode10) as ProcedureCode10,
+	Max(a.ProcedureCode11) as ProcedureCode11,
+	Max(a.ProcedureCode12) as ProcedureCode12,
+	Max(a.ProcedureCode13) as ProcedureCode13,
+	Max(a.ProcedureCode14) as ProcedureCode14,
+	Max(a.ProcedureCode15) as ProcedureCode15,
+	Max(a.ProcedureCode16) as ProcedureCode16,
+	Max(a.ProcedureCode17) as ProcedureCode17,
+	Max(a.ProcedureCode18) as ProcedureCode18,
+	Max(a.ProcedureCode19) as ProcedureCode19,
+	Max(a.ProcedureCode20) as ProcedureCode20,
+	Max(a.ProcedureCode21) as ProcedureCode21,
+	Max(a.ProcedureCode22) as ProcedureCode22,
+	Max(a.ProcedureCode23) as ProcedureCode23,
+	Max(a.ProcedureCode24) as ProcedureCode24,
+	Max(a.ProcedureCode25) as ProcedureCode25, 
+	Max(a.ProfitabilityCode) as ProfitabilityCode, 
+	Max(a.Region) as Region, 
+	Max(a.ServiceStartDate) as ServiceStartDate, 
+	Max(a.PlaceOfService) as PlaceOfService, 
+	Max(a.ClaimLineChargedAmount) as ClaimLineChargedAmount, 
+	Max(a.ClaimLinePaidAmount) as ClaimLinePaidAmount, 
+	Max(a.ProviderLocationCode) as ProviderLocationCode, 
+	Max(a.InNetworkCode) as InNetworkCode, 
+	Max(a.ProviderClassCode) as ProviderClassCode, 
+	--Max(a.ProviderSpecialtyCodeAlt) as ProviderSpecialtyCodeAlt,  dropped 11/9 per Tyson 
+	Max(a.Par) as Par, 
+	Max(a.PaidServiceUnitCount) as PaidServiceUnitCount, 
+	Max(a.CopayAmount) as CopayAmount, 
+	Max(a.CoinsuranceAmount) as CoinsuranceAmount, 
+	Max(a.DeductibleAmount) as DeductibleAmount, 
+	Max(a.ApprovedAmount) as ApprovedAmount,
+	Max(a.MemberPenaltyAmount) as MemberPenaltyAmount, 
+	Max(a.CoveredExpenseAmount) as CoveredExpenseAmount, 
+	Max(a.ClaimEntryDate) as ClaimEntryDate,    
+	Max(a.PrimaryCarrierResponsibilityCode) as PrimaryCarrierResponsibilityCode,
+	Max(a.ProcesserUnitId) as ProcesserUnitId, 
+	Max(a.PackageNr) as PackageNr, 
+	Max(a.EmployerGroupDepartmentNr) as EmployerGroupDepartmentNr, 
+	Max(a.COBSavingsAmount) as COBSavingsAmount, 
+	MAX(a.BillingNPI) as BillingNPI, 
+	 IsSingleContract,
+	Max(a.ClaimsSourceSortId) as ID, 
+	Max(a.DischargeStatus) as DischargeStatus,
+	Max(a.AdmitTypeCode) as AdmitTypeCode,
+	Max(a.DiagnosisRelatedGroup) as DiagnosisRelatedGroup, 
+	Max(a.ICDVersion) as ICDVersion,
+	Max(a.TypeOfBillCode) as TypeOfBillCode,
+	Max(a.DiagnosisRelatedGroupType) as DiagnosisRelatedGroupType,
+	Max(a.DiagnosisRelatedGroupSeverity) as DiagnosisRelatedGroupSeverity,
+	Max(a.RateCategory) as RateCategory,
+	Max(a.RateSubcategory) as RateSubcategory,
+	Max(a.RevenueCode) as RevenueCode,
+	Max(a.BenefitPaymentTierCode) as BenefitPaymentTierCode,
+	Max(a.PostDate) as PostDate,
+	Max(a.PreferredIndicator) as PreferredIndicator,
+	MAX(a.ValueFunctionCode1) as ValueFunctionCode1,
+	MAX(a.ValueFunctionCode2) as ValueFunctionCode2,
+	MAX(a.ValueFunctionCode3) as ValueFunctionCode3
+	, MAX(a.RenderingSpecialtyCode) as RenderingSpecialtyCode
+	, MAX(a.RenderingSpecialtyDescription) as RenderingSpecialtyDescription
+	, MAX(a.BillingSpecialtyCode) as BillingSpecialtyCode
+	, MAX(a.BillingSpecialtyDescription) as BillingSpecialtyDescription
+	, MAX(a.ALTERNATECLAIMNUMBER) as ALTERNATECLAIMNUMBER
+		into #temp1
+	 from #claimstest a
+		group by a.ClaimNr, a.claimlinenr, a.ClaimAdjustmentNr, FileType, ClaimLineStatusCode, IsSingleContract, [FileName]     
 
-MAX(a.A_WHOLE_LOT_OF_FIELDS),
-
-Max(a.DiagnosisRelatedGroupSeverity) as DiagnosisRelatedGroupSeverity,
-Max(a.RateCategory) as RateCategory,
-Max(a.RateSubcategory) as RateSubcategory,
-Max(a.RevenueCode) as RevenueCode,
-Max(a.BenefitPaymentTierCode) as BenefitPaymentTierCode,
-Max(a.PostDate) as PostDate,
-Max(a.PreferredIndicator) as PreferredIndicator,
-MAX(a.ValueFunctionCode1) as ValueFunctionCode1,
-MAX(a.ValueFunctionCode2) as ValueFunctionCode2,
-MAX(a.ValueFunctionCode3) as ValueFunctionCode3
-into #temp1
-from #claimstest a
-group by a.ClaimNr, a.claimlinenr, a.ClaimAdjustmentNr, FileType, ClaimLineStatusCode, IsSingleContract, [FileName]     
---4684135
 
 
 Drop table if exists #temp1a; 
 --set flags for prices if canceled out and add into previous table of max prices and int fields
+
 select distinct  a.*,
-			MAX(b.FLAG_ClaimChargedAmt) AS CancelOut_ClaimChargedAmt ,
-			MAX(b.FLAG_ClaimPaidAmt) AS CancelOut_ClaimPaidAmt ,
-			MAX(b.FLAG_ClaimLineChargedAmt) AS CancelOut_ClaimLineChargedAmt ,
-			MAX(b.FLAG_ClaimLinePaidAmt) AS CancelOut_ClaimLinePaidAmt ,
-			MAX(b.FLAG_PaidServiceUnitCnt) AS CancelOut_PaidServiceUnitCnt ,
-			MAX(b.FLAG_CopayAmt) AS CancelOut_CopayAmt ,
-			MAX(b.FLAG_CoinsuranceAmt) AS CancelOut_CoinsuranceAmt ,
-			MAX(b.FLAG_DeductibleAmt) AS CancelOut_DeductibleAmt,
-			MAX(b.FLAG_ApprovedAmt) AS CancelOut_ApprovedAmt ,
-			MAX(b.FLAG_MemberPenaltyAmt) AS CancelOut_MemberPenaltyAmt ,
-			MAX(b.FLAG_CoveredExpenseAmt) AS CancelOut_CoveredExpenseAmt ,
-			MAX(b.FLAG_BilledServiceUnitCnt) AS CancelOut_BilledServiceUnitCnt 
-into #temp1a
-from #temp1 a 
-LEFT JOIN (
-	SELECT  ClaimNr, claimlinenr,
-		CASE WHEN SUM(TOTAL_CLAIMCHARGEDAMOUNT)=0 THEN '1' ELSE '0' END AS FLAG_ClaimChargedAmt,
-		CASE WHEN SUM(Total_ClaimPaidAmount)=0 THEN '1' ELSE '0' END AS FLAG_ClaimPaidAmt,
-		CASE WHEN SUM(Total_ClaimLineChargedAmount)=0 THEN '1' ELSE '0' END AS FLAG_ClaimLineChargedAmt,
-		CASE WHEN SUM(Total_ClaimLinePaidAmount)=0 THEN '1' ELSE '0' END AS FLAG_ClaimLinePaidAmt,
-		CASE WHEN SUM(Total_PaidServiceUnitCount)=0 THEN '1' ELSE '0' END AS FLAG_PaidServiceUnitCnt,
-		CASE WHEN SUM(Total_CopayAmount)=0 THEN '1' ELSE '0' END AS FLAG_CopayAmt,
-		CASE WHEN SUM(Total_CoinsuranceAmount)=0 THEN '1' ELSE '0' END AS FLAG_CoinsuranceAmt,
-		CASE WHEN SUM(Total_DeductibleAmount)=0 THEN '1' ELSE '0' END AS FLAG_DeductibleAmt,
-		CASE WHEN SUM(Total_ApprovedAmount)=0 THEN '1' ELSE '0' END AS FLAG_ApprovedAmt,
-		CASE WHEN SUM(Total_MemberPenaltyAmount)=0 THEN '1' ELSE '0' END AS FLAG_MemberPenaltyAmt,
-		CASE WHEN SUM(Total_CoveredExpenseAmount)=0 THEN '1' ELSE '0' END AS FLAG_CoveredExpenseAmt,
-		CASE WHEN SUM(Total_BilledServiceUnitCount)=0 THEN '1' ELSE '0' END AS FLAG_BilledServiceUnitCnt
-	    FROM #temp1
-		GROUP BY CLAIMNR, CLAIMLINENR
-			)  b
-	ON a.claimnr = b.claimnr AND a.claimlinenr = b.claimlinenr
-group by LOTS OF FIELDS
+						MAX(b.FLAG_ClaimChargedAmt) AS CancelOut_ClaimChargedAmt ,
+						MAX(b.FLAG_ClaimPaidAmt) AS CancelOut_ClaimPaidAmt ,
+						MAX(b.FLAG_ClaimLineChargedAmt) AS CancelOut_ClaimLineChargedAmt ,
+						MAX(b.FLAG_ClaimLinePaidAmt) AS CancelOut_ClaimLinePaidAmt ,
+						MAX(b.FLAG_PaidServiceUnitCnt) AS CancelOut_PaidServiceUnitCnt ,
+						MAX(b.FLAG_CopayAmt) AS CancelOut_CopayAmt ,
+						MAX(b.FLAG_CoinsuranceAmt) AS CancelOut_CoinsuranceAmt ,
+						MAX(b.FLAG_DeductibleAmt) AS CancelOut_DeductibleAmt,
+						MAX(b.FLAG_ApprovedAmt) AS CancelOut_ApprovedAmt ,
+						MAX(b.FLAG_MemberPenaltyAmt) AS CancelOut_MemberPenaltyAmt ,
+						MAX(b.FLAG_CoveredExpenseAmt) AS CancelOut_CoveredExpenseAmt ,
+						MAX(b.FLAG_BilledServiceUnitCnt) AS CancelOut_BilledServiceUnitCnt 
+				    into #temp1a
+				from #temp1 a 
+				 LEFT JOIN (
+					SELECT  ClaimNr, ClaimAdjustmentNr,
+						CASE WHEN SUM(TOTAL_CLAIMCHARGEDAMOUNT)=0 THEN '1' ELSE '0' END AS FLAG_ClaimChargedAmt,
+						CASE WHEN SUM(Total_ClaimPaidAmount)=0 THEN '1' ELSE '0' END AS FLAG_ClaimPaidAmt,
+						CASE WHEN SUM(Total_ClaimLineChargedAmount)=0 THEN '1' ELSE '0' END AS FLAG_ClaimLineChargedAmt,
+						CASE WHEN SUM(Total_ClaimLinePaidAmount)=0 THEN '1' ELSE '0' END AS FLAG_ClaimLinePaidAmt,
+						CASE WHEN SUM(Total_PaidServiceUnitCount)=0 THEN '1' ELSE '0' END AS FLAG_PaidServiceUnitCnt,
+						CASE WHEN SUM(Total_CopayAmount)=0 THEN '1' ELSE '0' END AS FLAG_CopayAmt,
+						CASE WHEN SUM(Total_CoinsuranceAmount)=0 THEN '1' ELSE '0' END AS FLAG_CoinsuranceAmt,
+						CASE WHEN SUM(Total_DeductibleAmount)=0 THEN '1' ELSE '0' END AS FLAG_DeductibleAmt,
+						CASE WHEN SUM(Total_ApprovedAmount)=0 THEN '1' ELSE '0' END AS FLAG_ApprovedAmt,
+						CASE WHEN SUM(Total_MemberPenaltyAmount)=0 THEN '1' ELSE '0' END AS FLAG_MemberPenaltyAmt,
+						CASE WHEN SUM(Total_CoveredExpenseAmount)=0 THEN '1' ELSE '0' END AS FLAG_CoveredExpenseAmt,
+						CASE WHEN SUM(Total_BilledServiceUnitCount)=0 THEN '1' ELSE '0' END AS FLAG_BilledServiceUnitCnt
+					  FROM #temp1
+								GROUP BY CLAIMNR, CLAIMADJUSTMENTNR
+							)  b
+					ON a.claimnr = b.claimnr AND a.ClaimAdjustmentNr = b.ClaimAdjustmentNr
+				group by a.ClaimNr,	a.claimlinenr,	a.ClaimAdjustmentNr, a.hfClaimId,	AuthorizationNr,	ServiceEndDate,	MostRecentJobID,	PatientSSN,	DependentNr,	Person_Id,	MemberRelationshipCode,	
+				RenderingName,	RenderingAddress1,	RenderingAddress2,	RenderingCity,	RenderingState,	RenderingZipCode,	RenderingZipCode4,	BillingAddress1,	BillingAddress2,
+				BillingCity,	BillingState,	BillingZipCode,	BillingZipCode4,	EPIN,	CountyCode,	PatientDOB,	HealthCardId,	RenderingNPI,	PatientName,	PatientGender,	GroupNr,	SubgroupNr,	MemberSSN,
+				MemberName,	ClaimLineStatusCode, BillingTaxId,	ServiceRenderingType,	AdmitDate,	DischargeDate,		FileType,		PaidDate,	InvestigationClaimCode,	
+				HCPCS_Modifier1, HCPCS_Modifier2,	HCPCS_Modifier3,	HCPCS_Modifier4,	Deceased,	BilledServiceUnitCount,	RenderingTaxId,	ClaimChargedAmount,	ClaimPaidAmount, DiagnosisCodeAdmit,	DiagnosisCodeAdmitPOA ,
+				 DiagnosisCodePrinciple, DiagnosisCodePrinciplePOA,	DiagnosisCode1, DiagnosisCode1POA,	DiagnosisCode2,	DiagnosisCode2POA,	DiagnosisCode3,	DiagnosisCode3POA,	DiagnosisCode4,	DiagnosisCode4POA,	DiagnosisCode5,	DiagnosisCode5POA,	DiagnosisCode6,
+				DiagnosisCode6POA,	DiagnosisCode7,	DiagnosisCode7POA, DiagnosisCode8,	DiagnosisCode8POA,	DiagnosisCode9,	DiagnosisCode9POA,	DiagnosisCode10,	DiagnosisCode10POA,	DiagnosisCode11,	DiagnosisCode11POA,
+				DiagnosisCode12,	DiagnosisCode12POA,	DiagnosisCode13,	DiagnosisCode13POA,	DiagnosisCode14,	DiagnosisCode14POA,	DiagnosisCode15,	DiagnosisCode15POA,	DiagnosisCode16,	DiagnosisCode16POA,
+				DiagnosisCode17,	DiagnosisCode17POA,	DiagnosisCode18, DiagnosisCode18POA,	DiagnosisCode19,	DiagnosisCode19POA,	DiagnosisCode20,	DiagnosisCode20POA,	DiagnosisCode21,	DiagnosisCode21POA,
+				DiagnosisCode22,	DiagnosisCode22POA, DiagnosisCode23, DiagnosisCode23POA,	DiagnosisCode24,	DiagnosisCode24POA,	DiagnosisCode25,	DiagnosisCode25POA,	ProcedureCodeSurgical,	ProcedureCode1,
+				ProcedureCode2,	ProcedureCode3, ProcedureCode4,	ProcedureCode5,	ProcedureCode6,	ProcedureCode7,	ProcedureCode8,	ProcedureCode9,	ProcedureCode10,	ProcedureCode11,	ProcedureCode12,	ProcedureCode13,
+				ProcedureCode14,	ProcedureCode15,	ProcedureCode16,	ProcedureCode17,	ProcedureCode18, ProcedureCode19,	ProcedureCode20,	ProcedureCode21,	ProcedureCode22,	ProcedureCode23,
+				ProcedureCode24,	ProcedureCode25,	ProfitabilityCode,	Region,	ServiceStartDate,	PlaceOfService,	ClaimLineChargedAmount,	ClaimLinePaidAmount,	ProviderLocationCode,	InNetworkCode,	ProviderClassCode,
+				Par,	PaidServiceUnitCount,	CopayAmount,	CoinsuranceAmount,	DeductibleAmount,	ApprovedAmount,	MemberPenaltyAmount,	CoveredExpenseAmount,	ClaimEntryDate,
+				PrimaryCarrierResponsibilityCode,	ProcesserUnitId,	PackageNr,	EmployerGroupDepartmentNr,	COBSavingsAmount,	BillingNPI,	IsSingleContract,	ID,	DischargeStatus,	AdmitTypeCode,	DiagnosisRelatedGroup,
+				ICDVersion,	TypeOfBillCode,	DiagnosisRelatedGroupType,	DiagnosisRelatedGroupSeverity,	RateCategory,	RateSubcategory, RevenueCode,	BenefitPaymentTierCode, PostDate,	PreferredIndicator,
+				a.Total_ClaimChargedAmount,	a.Total_ClaimLineChargedAmount,	a.Total_BilledServiceUnitCount,	a.Total_ClaimPaidAmount,	a.Total_ClaimLinePaidAmount,	a.Total_PaidServiceUnitCount,	a.Total_CopayAmount,
+				a.Total_CoinsuranceAmount,	a.Total_DeductibleAmount,	a.Total_ApprovedAmount,	a.Total_MemberPenaltyAmount,	a.Total_CoveredExpenseAmount, a.ValueFunctionCode1, a.ValueFunctionCode2, a.ValueFunctionCode3
+				   ,RenderingSpecialtyCode, RenderingSpecialtyDescription, BillingSpecialtyCode, BillingSpecialtyDescription, ALTERNATECLAIMNUMBER ;   
 
+		
+drop table if exists #Jobidlast;  ---drops for space
+drop table if exists #temp1;   
 
-
-drop table #temp1;
 ---------------------------Fixes problems with NULLS and problem columns
-
+			
 drop table if exists #ctemp;
 ---establishes last non null values WITH NULLS 
-  with cte_grp AS 
-  (
-	SELECT 
-		a.claimnr
-		, a.claimlinenr
-		, a.ClaimAdjustmentNr
-		, DenialReasonCode
-		, DenialReasonDescription
-		, a.PaidDate
-		, a.PostDate 
-		, b.Total_ClaimChargedAmount
-		, b.Total_ClaimLineChargedAmount
-		, b.Total_BilledServiceUnitCount
-		, benefitcategorycode
-		, benefitcategorycodedescription
-		, surprisebilling
-		, qpaamount
-		, BillingName
-		, HCPCS
-		, ProviderSpecialtyCode
-		, ProviderContractType
-		, MemberAddress1
-		, MemberAddress2
-		, MemberCity
-		, MemberState
-		, MemberZipCode
-		, MemberZipCode4
-		, MostRecentJobID ,
-		grp =   MAX(IIF(DenialReasonCode IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp1 =  MAX(IIF(DenialReasonDescription IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp2 =  MAX(IIF(a.PaidDate IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp3 =  MAX(IIF(a.PostDate IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		--grp4 =  MAX(IIF(ProviderSpecialtyCodeAlt IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),   dropped 11/9 per Tyson
-		grp5 =  MAX(IIF(Total_ClaimChargedAmount  IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp6 =  MAX(IIF(Total_ClaimLineChargedAmount  IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp7 =  MAX(IIF(Total_BilledServiceUnitCount IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp8 =  MAX(IIF(benefitcategorycode IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp9 =  MAX(IIF(benefitcategorycodedescription IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp10 = MAX(IIF(surprisebilling IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp11 = MAX(IIF(qpaamount IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp12 = MAX(IIF(BillingName IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp13 = MAX(IIF(HCPCS IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp14 = MAX(IIF(ProviderSpecialtyCode IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp15 = MAX(IIF(ProviderContractType IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp16 = MAX(IIF(MemberAddress1 IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp17 = MAX(IIF(MemberAddress2 IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp18 = MAX(IIF(MemberCity IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp19 = MAX(IIF(MemberState IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp20 = MAX(IIF(MemberZipCode IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp21 = MAX(IIF(MemberZipCode4 IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		grp22 = MAX(IIF(MostRecentJobID IS NOT NULL, a.ID , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),
-		a.id
-		from #claimstest a
-		left join #temp1a b 
-		on a.claimnr = b.ClaimNr AND a.ClaimLineNr = b.claimlinenr AND a.ClaimAdjustmentNr = b.ClaimAdjustmentNr	
-	)										
-Select 
-	distinct claimnr,	claimlinenr,	ClaimAdjustmentNr	
-	, DenialReasonCode =				 MAX(DenialReasonCode) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, DenialReasonDescription =			 MAX(DenialReasonDescription) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp1 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, PaidDate =						 MAX(PaidDate) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp2 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, PostDate =						 MAX(PostDate) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp3 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING) 
-	--, ProviderSpecialtyCodeAlt =		 MAX(ProviderSpecialtyCodeAlt) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp4 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)  dropped 11/9 per Tyson
-	, Total_ClaimChargedAmount =		 MAX(Total_ClaimChargedAmount) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp5 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING) 
-	, Total_ClaimLineChargedAmount =	 MAX(Total_ClaimLineChargedAmount) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp6 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING) 
-	, Total_BilledServiceUnitCount =	 MAX(Total_BilledServiceUnitCount) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp7 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING) 
-	, benefitcategorycode =				 MAX(benefitcategorycode) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp8 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, benefitcategorycodedescription =	 MAX(benefitcategorycodedescription) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp9 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, surprisebilling =					 MAX(surprisebilling) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp10 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING) 
-	, qpaamount =						 MAX(qpaamount) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp11 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, BillingName =						 MAX(BillingName) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp12 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, HCPCS =							 MAX(HCPCS) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp13 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, ProviderSpecialtyCode =			 MAX(ProviderSpecialtyCode) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp14 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING) 
-	, ProviderContractType =			 MAX(ProviderContractType) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp15 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, MemberAddress1 =					 MAX(MemberAddress1) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp16 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING) 
-	, MemberAddress2 =					 MAX(MemberAddress2) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp17 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, MemberCity =						 MAX(MemberCity) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp18 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, MemberState =						 MAX(MemberState) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp19 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, MemberZipCode =					 MAX(MemberZipCode) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp20 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING) 
-	, MemberZipCode4 =					 MAX(MemberZipCode4) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp21 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, MostRecentJobID =					 MAX(MostRecentJobID) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp22 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)
-	, id
-	into #ctemp
-	FROM cte_grp
-	order by claimnr,claimlinenr,ClaimAdjustmentNr;   
-	---4786050
-
-
-drop table if exists #ctemp1;   
---- gets rid of NULL values while keeping correct info on problem columns
-with CTE as 
-	(
-		SELECT *, 
-			RN = ROW_NUMBER() OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr ORDER BY claimlinenr desc, ClaimAdjustmentNr desc)   --, MAX(id) as top_row
-			FROM #ctemp
-	)
-Select a.*
-
-INTO #ctemp1
-from CTE a
-	INNER JOIN (
-		SELECT claimnr, Claimlinenr, claimadjustmentnr, max(RN) as RN 
-		from CTE 
-		group by claimnr, Claimlinenr, claimadjustmentnr
-		) b
-	ON a.claimnr = b.claimnr AND a.Claimlinenr = b.claimlinenr AND a.claimadjustmentnr = b.claimadjustmentnr AND a.RN = b.RN   ---2244544
-
-
---drop table Empire.ClaimsSet_Test;
-Truncate Table Empire.ClaimsSet_Test;
-
+ with cte_grp AS 
+				  (
+					SELECT 
+						a.claimnr
+						, a.claimlinenr
+						, a.ClaimAdjustmentNr
+						, DenialReasonCode
+						, DenialReasonDescription
+						, a.PaidDate
+						, a.PostDate 
+						, b.Total_ClaimChargedAmount
+						, b.Total_ClaimLineChargedAmount
+						, b.Total_BilledServiceUnitCount
+						, benefitcategorycode
+						, benefitcategorycodedescription
+						, surprisebilling
+						, qpaamount
+						, BillingName
+						, HCPCS
+						, ProviderSpecialtyCode
+						, ProviderContractType
+						, MemberAddress1
+						, MemberAddress2
+						, MemberCity
+						, MemberState
+						, MemberZipCode
+						, MemberZipCode4
+						, MostRecentJobID 
+						, b.RenderingName
+						, b.RenderingAddress1
+						, b.RenderingAddress2
+						, b.RenderingCity
+						, b.RenderingState
+						, b.RenderingZipCode
+						, b.RenderingZipCode4
+						, b.BillingAddress1
+						, b.BillingAddress2
+						, b.BillingCity
+						, b.BillingState
+						, b.BillingZipCode	,
+						grp  =   MAX(IIF(DenialReasonCode IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr ROWS Unbounded PRECEDING),
+						grp1 =  MAX(IIF(DenialReasonDescription IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp2 =  MAX(IIF(a.PaidDate IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr ROWS Unbounded PRECEDING),
+						grp3 =  MAX(IIF(a.PostDate IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr ROWS Unbounded PRECEDING),
+						--grp4 =  MAX(IIF(ProviderSpecialtyCodeAlt IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.claimlinenr, a.ClaimAdjustmentNr ORDER by a.claimlinenr, a.ClaimAdjustmentNr ROWS Unbounded PRECEDING),   dropped 11/9 per Tyson
+						grp5 =  MAX(IIF(Total_ClaimChargedAmount  IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr ROWS Unbounded PRECEDING),
+						grp6 =  MAX(IIF(Total_ClaimLineChargedAmount  IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp7 =  MAX(IIF(Total_BilledServiceUnitCount IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp8 =  MAX(IIF(benefitcategorycode IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp9 =  MAX(IIF(benefitcategorycodedescription IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp10 = MAX(IIF(surprisebilling IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp11 = MAX(IIF(qpaamount IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp12 = MAX(IIF(BillingName IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp13 = MAX(IIF(HCPCS IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp14 = MAX(IIF(ProviderSpecialtyCode IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp15 = MAX(IIF(ProviderContractType IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp16 = MAX(IIF(MemberAddress1 IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp17 = MAX(IIF(MemberAddress2 IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp18 = MAX(IIF(MemberCity IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp19 = MAX(IIF(MemberState IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp20 = MAX(IIF(MemberZipCode IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp21 = MAX(IIF(MemberZipCode4 IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp22 = MAX(IIF(MostRecentJobID IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp23 = MAX(IIF(b.RenderingName IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp24 = MAX(IIF(b.RenderingAddress1 IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp25 = MAX(IIF(b.RenderingAddress2 IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp26 = MAX(IIF(b.RenderingCity IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp27 = MAX(IIF(b.RenderingState IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp28 = MAX(IIF(b.RenderingZipCode IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp29= MAX(IIF(b.RenderingZipCode4 IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp30 = MAX(IIF(b.BillingAddress1 IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp31 = MAX(IIF(b.BillingAddress2 IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp32 = MAX(IIF(b.BillingCity IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp33 = MAX(IIF(b.BillingState IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						grp34 = MAX(IIF(b.BillingZipCode IS NOT NULL, a.ClaimsSourceSortId , NULL)) OVER (PARTITION BY a.claimnr, a.ClaimAdjustmentNr, a.claimlinenr ORDER by  a.ClaimAdjustmentNr, a.claimlinenr  ROWS Unbounded PRECEDING),
+						a.ClaimsSourceSortId
+						from #claimstest a
+						  left join #temp1a b 
+							on a.claimnr = b.ClaimNr 
+						     AND a.ClaimAdjustmentNr = b.ClaimAdjustmentNr 
+						     AND a.ClaimLineNr = b.claimlinenr 	
+					)										
+				Select 
+					distinct claimnr, claimlinenr, ClaimAdjustmentNr	
+					, DenialReasonCode =				 MAX(DenialReasonCode) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp ORDER by  ClaimAdjustmentNr, claimlinenr  ROWS Unbounded PRECEDING)
+					, DenialReasonDescription =			 MAX(DenialReasonDescription) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp1 ORDER by  ClaimAdjustmentNr, claimlinenr  ROWS Unbounded PRECEDING)
+					, PaidDate =						 MAX(PaidDate) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp2 ORDER by  ClaimAdjustmentNr, claimlinenr  ROWS Unbounded PRECEDING)
+					, PostDate =						 MAX(PostDate) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp3 ORDER by  ClaimAdjustmentNr, claimlinenr  ROWS Unbounded PRECEDING) 
+					--, ProviderSpecialtyCodeAlt =		 MAX(ProviderSpecialtyCodeAlt) OVER (PARTITION BY claimnr, claimlinenr, ClaimAdjustmentNr, grp4 order by claimlinenr, ClaimAdjustmentNr ROWS Unbounded PRECEDING)  dropped 11/9 per Tyson
+					, Total_ClaimChargedAmount =		 MAX(Total_ClaimChargedAmount) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp5 ORDER by  ClaimAdjustmentNr, claimlinenr  ROWS Unbounded PRECEDING) 
+					, Total_ClaimLineChargedAmount =	 MAX(Total_ClaimLineChargedAmount) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp6 ORDER by  ClaimAdjustmentNr, claimlinenr  ROWS Unbounded PRECEDING) 
+					, Total_BilledServiceUnitCount =	 MAX(Total_BilledServiceUnitCount) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp7 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING) 
+					, benefitcategorycode =				 MAX(benefitcategorycode) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp8 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, benefitcategorycodedescription =	 MAX(benefitcategorycodedescription) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp9 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, surprisebilling =					 MAX(surprisebilling) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp10 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING) 
+					, qpaamount =						 MAX(qpaamount) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp11 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, BillingName =						 MAX(BillingName) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp12 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, HCPCS =							 MAX(HCPCS) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp13 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, ProviderSpecialtyCode =			 MAX(ProviderSpecialtyCode) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp14 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING) 
+					, ProviderContractType =			 MAX(ProviderContractType) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp15 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, MemberAddress1 =					 MAX(MemberAddress1) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp16 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING) 
+					, MemberAddress2 =					 MAX(MemberAddress2) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp17 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, MemberCity =						 MAX(MemberCity) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp18 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, MemberState =						 MAX(MemberState) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp19 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, MemberZipCode =					 MAX(MemberZipCode) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp20 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING) 
+					, MemberZipCode4 =					 MAX(MemberZipCode4) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp21 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, MostRecentJobID =					 MAX(MostRecentJobID) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp22 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, RenderingName =					 MAX(RenderingName) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp23 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, RenderingAddress1 =				 MAX(RenderingAddress1) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp24 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, RenderingAddress2 =				 MAX(RenderingAddress2) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp25 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, RenderingCity =					 MAX(RenderingCity) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp26 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING) 
+					, RenderingState =					 MAX(RenderingState) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp27 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, RenderingZipCode =				 MAX(RenderingZipCode) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp28 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING) 
+					, RenderingZipCode4 =				 MAX(RenderingZipCode4) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp29 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, BillingAddress1 =					 MAX(BillingAddress1) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp30 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, BillingAddress2 =					 MAX(BillingAddress2) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp31 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, BillingCity =						 MAX(BillingCity) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp32 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING) 
+					, BillingState =					 MAX(BillingState) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp33 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, BillingZipCode =					 MAX(BillingZipCode) OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr, grp34 ORDER by  ClaimAdjustmentNr, claimlinenr ROWS Unbounded PRECEDING)
+					, ClaimsSourceSortId
+						into #ctemp
+					FROM cte_grp
+						order by claimnr,ClaimAdjustmentNr,claimlinenr;   
+			
+			
+drop table if exists #claimsSet;
 --final join to moosh everything together
-Insert Into  SCHEMA.ClaimsSet_Test 
+--Insert Into  Empire.ClaimsSet_Test 
 select distinct a.ClaimNr
-,a.claimlinenr
-,a.ClaimAdjustmentNr
-,Total_ClaimPaidAmount
-,Total_ClaimLinePaidAmount
-,Total_PaidServiceUnitCount
+				,MAX(a.ClaimAdjustmentNr) AS ClaimAdjustmentNr
+				, a.claimlinenr
+				,a.HfClaimId  
+				,MAX(Total_ClaimPaidAmount) AS Total_ClaimPaidAmount
+				,MAX(Total_ClaimLinePaidAmount) AS Total_ClaimLinePaidAmount
+				,MAX(Total_PaidServiceUnitCount) AS Total_PaidServiceUnitCount
+				,MAX(Total_CopayAmount) AS Total_CopayAmount
+				,MAX(Total_CoinsuranceAmount) AS Total_CoinsuranceAmount
+				,MAX(Total_DeductibleAmount) AS Total_DeductibleAmount
+				,MAX(Total_ApprovedAmount) AS Total_ApprovedAmount
+				,MAX(Total_MemberPenaltyAmount) AS Total_MemberPenaltyAmount
+				,MAX(Total_CoveredExpenseAmount) AS Total_CoveredExpenseAmount
+				,MAX(AuthorizationNr) AS AuthorizationNr
+				,MAX(ServiceEndDate) AS ServiceEndDate
+				,MAX(b.MostRecentJobID) AS MostRecentJobID
+				,MAX(PatientSSN) AS PatientSSN
+				,MAX(DependentNr) AS DependentNr
+				,MAX(Person_Id) AS Person_Id
+				,MAX(MemberRelationshipCode) AS MemberRelationshipCode
+				,MAX(b.RenderingName) AS RenderingName
+				,MAX(b.RenderingAddress1) AS RenderingAddress1
+				,MAX(b.RenderingAddress2) AS RenderingAddress2
+				,MAX(b.RenderingCity) AS RenderingCity
+				,MAX(b.RenderingState) AS RenderingState
+				,MAX(b.RenderingZipCode) AS RenderingZipCode
+				,MAX(b.RenderingZipCode4) AS RenderingZipCode4
+				,MAX(b.BillingAddress1) AS BillingAddress1
+				,MAX(b.BillingAddress2) AS BillingAddress2
+				,MAX(b.BillingCity) AS BillingCity
+				,MAX(b.BillingState) AS BillingState
+				,MAX(b.BillingZipCode) AS BillingZipCode
+				,MAX(BillingZipCode4) AS BillingZipCode4
+				,MAX(EPIN) AS EPIN
+				,MAX(CountyCode) AS CountyCode
+				,MAX(PatientDOB) AS PatientDOB
+				,MAX(HealthCardId) AS HealthCardId
+				,MAX(RenderingNPI) AS RenderingNPI
+				,MAX(PatientName) AS PatientName
+				,MAX(PatientGender) AS PatientGender
+				,MAX(GroupNr) AS GroupNr
+				,MAX(SubgroupNr) AS SubgroupNr
+				,MAX(MemberSSN) AS MemberSSN
+				,MAX(MemberName) AS MemberName
+				, ClaimLineStatusCode
+				,MAX(BillingTaxId) AS BillingTaxId
+				,MAX(ServiceRenderingType) AS ServiceRenderingType
+				,MAX(AdmitDate) AS AdmitDate
+				,MAX(DischargeDate) AS DischargeDate
+				,MAX(FileType) AS FileType
+				,MAX(InvestigationClaimCode) AS InvestigationClaimCode
+				,MAX(HCPCS_Modifier1) AS HCPCS_Modifier1
+				,MAX(HCPCS_Modifier2) AS HCPCS_Modifier2
+				,MAX(HCPCS_Modifier3) AS HCPCS_Modifier3
+				,MAX(HCPCS_Modifier4) AS HCPCS_Modifier4
+				,MAX(Deceased) AS Deceased
+				,MAX(BilledServiceUnitCount) AS BilledServiceUnitCount
+				,MAX(RenderingTaxId) AS RenderingTaxId
+				,MAX(ClaimChargedAmount) AS ClaimChargedAmount
+				,MAX(ClaimPaidAmount) AS ClaimPaidAmount
+				,MAX(DiagnosisCodeAdmit) AS DiagnosisCodeAdmit
+				,MAX(DiagnosisCodeAdmitPOA) AS DiagnosisCodeAdmitPOA
+				,MAX(DiagnosisCodePrinciple) AS DiagnosisCodePrinciple
+				,MAX(DiagnosisCodePrinciplePOA) AS DiagnosisCodePrinciplePOA
+				,MAX(DiagnosisCode1) AS DiagnosisCode1
+				,MAX(DiagnosisCode1POA) AS DiagnosisCode1POA
+				,MAX(DiagnosisCode2) AS DiagnosisCode2
+				,MAX(DiagnosisCode2POA) AS DiagnosisCode2POA
+				,MAX(DiagnosisCode3) AS DiagnosisCode3
+				,MAX(DiagnosisCode3POA) AS DiagnosisCode3POA
+				,MAX(DiagnosisCode4) AS DiagnosisCode4
+				,MAX(DiagnosisCode4POA) AS DiagnosisCode4POA
+				,MAX(DiagnosisCode5) AS DiagnosisCode5
+				,MAX(DiagnosisCode5POA) AS DiagnosisCode5POA
+				,MAX(DiagnosisCode6) AS DiagnosisCode6
+				,MAX(DiagnosisCode6POA) AS DiagnosisCode6POA
+				,MAX(DiagnosisCode7) AS DiagnosisCode7
+				,MAX(DiagnosisCode7POA) AS DiagnosisCode7POA
+				,MAX(DiagnosisCode8) AS DiagnosisCode8
+				,MAX(DiagnosisCode8POA) AS DiagnosisCode8POA
+				,MAX(DiagnosisCode9) AS DiagnosisCode9
+				,MAX(DiagnosisCode9POA) AS DiagnosisCode9POA
+				,MAX(DiagnosisCode10) AS DiagnosisCode10
+				,MAX(DiagnosisCode10POA) AS DiagnosisCode10POA
+				,MAX(DiagnosisCode11) AS DiagnosisCode11
+				,MAX(DiagnosisCode11POA) AS DiagnosisCode11POA
+				,MAX(DiagnosisCode12) AS DiagnosisCode12
+				,MAX(DiagnosisCode12POA) AS DiagnosisCode12POA
+				,MAX(DiagnosisCode13) AS DiagnosisCode13
+				,MAX(DiagnosisCode13POA) AS DiagnosisCode13POA
+				,MAX(DiagnosisCode14) AS DiagnosisCode14
+				,MAX(DiagnosisCode14POA) AS DiagnosisCode14POA
+				,MAX(DiagnosisCode15) AS DiagnosisCode15
+				,MAX(DiagnosisCode15POA) AS DiagnosisCode15POA
+				,MAX(DiagnosisCode16) AS DiagnosisCode16
+				,MAX(DiagnosisCode16POA) AS DiagnosisCode16POA
+				,MAX(DiagnosisCode17) AS DiagnosisCode17
+				,MAX(DiagnosisCode17POA) AS DiagnosisCode17POA
+				,MAX(DiagnosisCode18) AS DiagnosisCode18
+				,MAX(DiagnosisCode18POA) AS DiagnosisCode18POA
+				,MAX(DiagnosisCode19) AS DiagnosisCode19
+				,MAX(DiagnosisCode19POA) AS DiagnosisCode19POA
+				,MAX(DiagnosisCode20) AS DiagnosisCode20
+				,MAX(DiagnosisCode20POA) AS DiagnosisCode20POA
+				,MAX(DiagnosisCode21) AS DiagnosisCode21
+				,MAX(DiagnosisCode21POA) AS DiagnosisCode21POA
+				,MAX(DiagnosisCode22) AS DiagnosisCode22
+				,MAX(DiagnosisCode22POA) AS DiagnosisCode22POA
+				,MAX(DiagnosisCode23) AS DiagnosisCode23
+				,MAX(DiagnosisCode23POA) AS DiagnosisCode23POA
+				,MAX(DiagnosisCode24) AS DiagnosisCode24
+				,MAX(DiagnosisCode24POA) AS DiagnosisCode24POA
+				,MAX(DiagnosisCode25) AS DiagnosisCode25
+				,MAX(DiagnosisCode25POA) AS DiagnosisCode25POA
+				,MAX(ProcedureCodeSurgical) AS ProcedureCodeSurgical
+				,MAX(ProcedureCode1) AS ProcedureCode1
+				,MAX(ProcedureCode2) AS ProcedureCode2
+				,MAX(ProcedureCode3) AS ProcedureCode3
+				,MAX(ProcedureCode4) AS ProcedureCode4
+				,MAX(ProcedureCode5) AS ProcedureCode5
+				,MAX(ProcedureCode6) AS ProcedureCode6
+				,MAX(ProcedureCode7) AS ProcedureCode7
+				,MAX(ProcedureCode8) AS ProcedureCode8
+				,MAX(ProcedureCode9) AS ProcedureCode9
+				,MAX(ProcedureCode10) AS ProcedureCode10
+				,MAX(ProcedureCode11) AS ProcedureCode11
+				,MAX(ProcedureCode12) AS ProcedureCode12
+				,MAX(ProcedureCode13) AS ProcedureCode13
+				,MAX(ProcedureCode14) AS ProcedureCode14
+				,MAX(ProcedureCode15) AS ProcedureCode15
+				,MAX(ProcedureCode16) AS ProcedureCode16
+				,MAX(ProcedureCode17) AS ProcedureCode17
+				,MAX(ProcedureCode18) AS ProcedureCode18
+				,MAX(ProcedureCode19) AS ProcedureCode19
+				,MAX(ProcedureCode20) AS ProcedureCode20
+				,MAX(ProcedureCode21) AS ProcedureCode21
+				,MAX(ProcedureCode22) AS ProcedureCode22
+				,MAX(ProcedureCode23) AS ProcedureCode23
+				,MAX(ProcedureCode24) AS ProcedureCode24
+				,MAX(ProcedureCode25) AS ProcedureCode25
+				,MAX(ProfitabilityCode) AS ProfitabilityCode
+				,MAX(Region) AS Region
+				,MAX(ServiceStartDate) AS ServiceStartDate
+				,MAX(PlaceOfService) AS PlaceOfService
+				,MAX(ClaimLineChargedAmount) AS ClaimLineChargedAmount
+				,MAX(ClaimLinePaidAmount) AS ClaimLinePaidAmount
+				,MAX(ProviderLocationCode) AS ProviderLocationCode
+				,MAX(InNetworkCode) AS InNetworkCode
+				,MAX(ProviderClassCode) AS ProviderClassCode
+				,MAX(Par) AS Par
+				,MAX(PaidServiceUnitCount) AS PaidServiceUnitCount
+				,MAX(CopayAmount) AS CopayAmount
+				,MAX(CoinsuranceAmount) AS CoinsuranceAmount
+				,MAX(DeductibleAmount) AS DeductibleAmount
+				,MAX(ApprovedAmount) AS ApprovedAmount
+				,MAX(MemberPenaltyAmount) AS MemberPenaltyAmount
+				,MAX(CoveredExpenseAmount) AS CoveredExpenseAmount
+				,MAX(ClaimEntryDate) AS ClaimEntryDate
+				,MAX(PrimaryCarrierResponsibilityCode) AS PrimaryCarrierResponsibilityCode
+				,MAX(ProcesserUnitId) AS ProcesserUnitId
+				,MAX(PackageNr) AS PackageNr
+				,MAX(EmployerGroupDepartmentNr) AS EmployerGroupDepartmentNr
+				,MAX(COBSavingsAmount) AS COBSavingsAmount
+				,MAX(BillingNPI) AS BillingNPI
+				, IsSingleContract
+				,MAX(DischargeStatus) AS DischargeStatus
+				,MAX(AdmitTypeCode) AS AdmitTypeCode
+				,MAX(DiagnosisRelatedGroup) AS DiagnosisRelatedGroup
+				,MAX(ICDVersion) AS ICDVersion
+				,MAX(TypeOfBillCode) AS TypeOfBillCode
+				,MAX(DiagnosisRelatedGroupType) AS DiagnosisRelatedGroupType
+				,MAX(DiagnosisRelatedGroupSeverity) AS DiagnosisRelatedGroupSeverity
+				,MAX(RateCategory) AS RateCategory
+				,MAX(RateSubcategory) AS RateSubcategory
+				,MAX(RevenueCode) AS RevenueCode
+				,MAX(BenefitPaymentTierCode) AS BenefitPaymentTierCode
+				,MAX(PreferredIndicator) AS PreferredIndicator
+				,MAX(ValueFunctionCode1) AS ValueFunctionCode1
+				,MAX(ValueFunctionCode2) AS ValueFunctionCode2
+				,MAX(ValueFunctionCode3) AS ValueFunctionCode3
+				,MAX(CancelOut_ClaimChargedAmt) AS CancelOut_ClaimChargedAmt
+				,MAX(CancelOut_ClaimPaidAmt) AS CancelOut_ClaimPaidAmt
+				,MAX(CancelOut_ClaimLineChargedAmt) AS CancelOut_ClaimLineChargedAmt
+				,MAX(CancelOut_ClaimLinePaidAmt) AS CancelOut_ClaimLinePaidAmt
+				,MAX(CancelOut_PaidServiceUnitCnt) AS CancelOut_PaidServiceUnitCnt
+				,MAX(CancelOut_CopayAmt) AS CancelOut_CopayAmt
+				,MAX(CancelOut_CoinsuranceAmt) AS CancelOut_CoinsuranceAmt
+				,MAX(CancelOut_DeductibleAmt) AS CancelOut_DeductibleAmt
+				,MAX(CancelOut_ApprovedAmt) AS CancelOut_ApprovedAmt
+				,MAX(CancelOut_MemberPenaltyAmt) AS CancelOut_MemberPenaltyAmt
+				,MAX(CancelOut_CoveredExpenseAmt) AS CancelOut_CoveredExpenseAmt
+				,MAX(CancelOut_BilledServiceUnitCnt) AS CancelOut_BilledServiceUnitCnt
+				,MAX(b.DenialReasonCode) AS DenialReasonCode
+				,MAX(b.DenialReasonDescription) AS DenialReasonDescription
+				,MAX(b.PaidDate) AS PaidDate
+				,MAX(b.PostDate) AS PostDate
+				,MAX(b.Total_ClaimChargedAmount) AS Total_ClaimChargedAmount
+				,MAX(b.Total_ClaimLineChargedAmount) AS Total_ClaimLineChargedAmount
+				,MAX(b.Total_BilledServiceUnitCount) AS Total_BilledServiceUnitCount
+				,MAX(b.benefitcategorycode) AS benefitcategorycode
+				,MAX(b.benefitcategorycodedescription) AS benefitcategorycodedescription
+				,MAX(b.surprisebilling) AS surprisebilling
+				,MAX(b.qpaamount) AS qpaamount
+				,MAX(b.BillingName) AS BillingName
+				,MAX(RenderingSpecialtyCode) as RenderingSpecialtyCode
+				,MAX(RenderingSpecialtyDescription) as RenderingSpecialtyDescription
+				,MAX(BillingSpecialtyCode) as BillingSpecialtyCode
+				,MAX(BillingSpecialtyDescription) as BillingSpecialtyDescription
+				,MAX(ALTERNATECLAIMNUMBER) as ALTERNATECLAIMNUMBER
+				,MAX(b.HCPCS) AS HCPCS
+				,MAX(B.ProviderSpecialtyCode) AS ProviderSpecialtyCode
+				,MAX(b.ProviderContractType) AS ProviderContractType
+				,MAX(b.MemberAddress1) AS MemberAddress1
+				,MAX(b.MemberAddress2) AS MemberAddress2
+				,MAX(b.MemberCity) AS MemberCity
+				,MAX(b.MemberState) AS MemberState
+				,MAX(b.MemberZipCode) AS MemberZipCode
+				,MAX(b.MemberZipCode4) AS MemberZipCode4
+				 into #claimsSet					
+					from #temp1a a 
+					  Left JOIN  #ctemp b 
+						ON b.claimnr = a.claimnr 
+						 AND b.ClaimAdjustmentNr = a.claimadjustmentnr
+						 AND b.claimlinenr = a.claimlinenr 
+						  --WHERE NOT EXISTS ( Select b.ClaimNr, b.ClaimAdjustmentNr, b.ClaimLineNr
+								--				FROM Empire.ClaimsSet_Test b ---- 2.0 End table name dependent 
+								--					where b.claimnr = a.claimnr 
+								--						AND b.ClaimAdjustmentNr = a.claimadjustmentnr 
+								--						AND b.claimlinenr = a.claimlinenr 	 ) ----- Only update with new claims (Claim, Line, Adj) 
+							group by a.claimnr, a.ClaimAdjustmentNr, a.ClaimLineNr, a.hfclaimid, ClaimLineStatusCode, IsSingleContract
 
-,MORE FIELDS... 
 
-,CancelOut_DeductibleAmt
-,CancelOut_ApprovedAmt
-,CancelOut_MemberPenaltyAmt
-,CancelOut_CoveredExpenseAmt
-,CancelOut_BilledServiceUnitCnt
-	, b.DenialReasonCode
-	, b.DenialReasonDescription
-	, b.PaidDate
-	, b.PostDate
-	, b.Total_ClaimChargedAmount
-	, b.Total_ClaimLineChargedAmount
-	, b.Total_BilledServiceUnitCount
-	, b.benefitcategorycode
-	, b.benefitcategorycodedescription
-	, b.surprisebilling
-	, b.qpaamount
-	, b.BillingName
-	, b.HCPCS
-	, b.ProviderSpecialtyCode
-	, b.ProviderContractType
-	, b.MemberAddress1
-	, b.MemberAddress2
-	, b.MemberCity
-	, b.MemberState
-	, b.MemberZipCode
-	, b.MemberZipCode4
- --into SCHEMA.ClaimsSet_Test     --final table 
-	from #temp1a a 
-	  Left JOIN  #ctemp1 b 
-		ON b.claimnr = a.claimnr 
-		AND b.claimlinenr = a.claimlinenr 
-		AND b.ClaimAdjustmentNr = a.claimadjustmentnr
-		  --WHERE NOT EXISTS ( Select ClaimNr, ClaimLineNr, ClaimAdjustmentNr
-    --                    FROM SCHEMA.ClaimsSet_Test b            ---- 2.0 End table name dependent 
-    --                    where b.claimnr = a.claimnr 
-		  --                    AND b.claimlinenr = a.claimlinenr 
-		  --                    AND b.ClaimAdjustmentNr = a.claimadjustmentnr ) ----- Should only update with new claims (Claim, Line, Adj)
-		; 
+Drop table if exists #ctemp; ---drops for space
+Drop table if exists #temp1a;
+Drop table if exists #claimstest;
+
+-------------------------------------------HfClaimId-----------------------v
+
+--------create temp table for unique claimnumber with missing HfClaimId
+--drop table if exists #Hfbridge;
+
+--select distinct ClaimNr, HfClaimId
+--into #Hfbridge
+--from [Empire].[ClaimsSet_Test]
+--where HfClaimID is NULL
+
+-----find current largest HfClaimId
+--DECLARE @id BIGINT
+--Set @id = (select max(HfClaimId) from [Empire].[ClaimsSet_Test]) ---18374439
+
+-----update temp table with new HfClaimIds
+--update hfb
+--set @id = HfClaimId = @id + 1
+--from #Hfbridge hfb
+--inner join #Hfbridge cd
+--ON cd.ClaimNr = hfb.ClaimNr
+--where hfb.HfClaimId IS NULL
+
+-------Add newly minted HfClaimIds to data
+--update b 
+--set b.HfClaimId = hfb.HfClaimId
+--from [Empire].[ClaimsSet_Test] b
+--Inner join #Hfbridge hfb
+--on hfb.ClaimNr = b.ClaimNr
+--where b.HfClaimId IS NULL
+
+--------------------------------------------------------------------------^
+
+--------------------------------------------------Moosh part 2------------------------------------------------------
+-----------------Creation of FLAT Table that has most recent claim, adj num, and line nums
 
 
-------------------------------------------Moosh part 2
 Drop table if exists #temp11;   
-
-select distinct  (a.ClaimNr),    -- pull max claim line number
-  Max( a.claimlinenr) as ClaimLineNr
-  into #temp11
-  from Empire.ClaimsSet_Test a
- group by a.ClaimNr;  
-
-
-
- Drop table if exists #temp11a; 
-
- select a.*, MAX(b.ClaimAdjustmentNr) as ClaimAdjustmentNr   -- pull max claim adjustment number
- INTO #temp11a
- from #temp11 a
- left join Empire.ClaimsSet_Test b 
- on a.claimnr = b.claimnr and a.ClaimLineNr = b.claimlinenr
- group by a.claimnr, a.ClaimLineNr;   
+		----pull only max adjustment number from each claim to set up flat
+select   ClaimNr,    					-- pull each claim
+		 MAX(ClaimAdjustmentNr) as ClaimAdjustmentNr 	-- pull max claim adj number
+			 into #temp11
+		  from #claimsSet 
+			    group by ClaimNr
+		        order by ClaimNr
+			
 
 
-TRUNCATE TABLE [SCHEMA].[ClaimsFlat_Test];
+			
+---bring everything into a flat most recent claim, all claim line numbers, and max claim adjustment number for analysis purposes
+			
+INSERT INTO [Empire].[ClaimsFlat_Test]
+				select  b.ClaimNr ,
+						Max(b.ClaimAdjustmentNr) as ClaimAdjustmentNr,
+						a.ClaimLineNr ,
+						Max(a.HfClaimId) as HfClaimID ,                        ---------------HfClaimID
+						MAX(a.Person_ID) as Person_Id
+						, a.MemberAddress1
+						, a.MemberAddress2
+						, a.MemberCity
+						, a.MemberState
+						, a.MemberZipCode
+						, a.MemberZipCode4 ,
+						MAX(a.AuthorizationNr) as AuthorizationNr,
+						MAX(a.ServiceEndDate) as ServiceEndDate,
+						max(a.MostRecentJobID) as MostRecentJobID,
+						max(a.patientSSN) as PatientSSN, 
+						Max(a.dependentNr) as DependentNr, 
+						MAX(a.MemberRelationshipCode) as MemberRelationshipCode,
+						Max(a.RenderingName) as RenderingName, 
+						Max(a.RenderingAddress1) as RenderingAddress1, 
+						Max(a.RenderingAddress2) as RenderingAddress2, 
+						Max(a.RenderingCity) as RenderingCity, 
+						Max(a.RenderingState) as RenderingState, 
+						Max(a.RenderingZipCode) as RenderingZipCode, 
+						Max(a.RenderingZipCode4) as RenderingZipCode4
+						, a.ProviderSpecialtyCode
+						, a.ProviderContractType
+						, a.BillingName , 
+						Max(a.BillingAddress1) as BillingAddress1, 
+						Max(a.BillingAddress2) as BillingAddress2, 
+						Max(a.BillingCity) as BillingCity, 
+						Max(a.BillingState) as BillingState, 
+						Max(a.BillingZipCode) as BillingZipCode, 
+						Max(a.BillingZipCode4) as BillingZipCode4 ,
+						Max(a.EPIN) as EPIN, 
+						Max(a.CountyCode) as CountyCode, 
+						Max(a.PatientDOB) as PatientDOB, 
+						Max(a.HealthCardId) as HealthCardId, 
+						Max(a.RenderingNPI) as RenderingNPI,
+						Max(a.PatientName) as PatientName, 
+						Max(a.PatientGender) as PatientGender, 
+						Max(a.GroupNr) as GroupNr,   
+						Max(a.SubgroupNr) as SubgroupNr, 
+						Max(a.MemberSSN) as MemberSSN, 
+						Max(a.MemberName) as MemberName
+						, a.ClaimLineStatusCode , 
+						Max(a.BillingTaxId) as BillingTaxId, 
+						Max(a.ServiceRenderingType) as ServiceRenderingType,
+						Max(a.AdmitDate) as AdmitDate, 
+						Max(a.DischargeDate) as DischargeDate,
+						Max(a.FileType) as FileType,
+						Max(a.PaidDate) as PaidDate, 
+						Max(a.InvestigationClaimCode) as InvestigationClaimCode, 
+						Max(a.HCPCS_Modifier1) as HCPCS_Modifier1, 
+						Max(a.HCPCS_Modifier2) as HCPCS_Modifier2,
+						Max(a.HCPCS_Modifier3) as HCPCS_Modifier3,
+						Max(a.HCPCS_Modifier4) as HCPCS_Modifier4
+						, a.HCPCS , 
+						Max(a.Deceased) as Deceased, 
+						Max(a.BilledServiceUnitCount) as BilledServiceUnitCount, 
+						Max(a.RenderingTaxId) as RenderingTaxId, 
+						Max(a.ClaimChargedAmount) as ClaimChargedAmount, 
+						Max(a.ClaimPaidAmount) as ClaimPaidAmount,   
+						Max(a.DiagnosisCodeAdmit) as DiagnosisCodeAdmit,
+						Max(a.DiagnosisCodeAdmitPOA) as DiagnosisCodeAdmitPOA, 
+						Max(a.DiagnosisCodePrinciple) as DiagnosisCodePrinciple, 
+						Max(a.DiagnosisCodePrinciplePOA) as DiagnosisCodePrinciplePOA, 
+						Max(a.DiagnosisCode1) as DiagnosisCode1, 
+						Max(a.DiagnosisCode1POA) as DiagnosisCode1POA, 
+						Max(a.DiagnosisCode2) as DiagnosisCode2, 
+						Max(a.DiagnosisCode2POA) as DiagnosisCode2POA, 
+						Max(a.DiagnosisCode3) as DiagnosisCode3, 
+						Max(a.DiagnosisCode3POA) as DiagnosisCode3POA, 
+						Max(a.DiagnosisCode4) as DiagnosisCode4, 
+						Max(a.DiagnosisCode4POA) as DiagnosisCode4POA, 
+						Max(a.DiagnosisCode5) as DiagnosisCode5, 
+						Max(a.DiagnosisCode5POA) as DiagnosisCode5POA, 
+						Max(a.DiagnosisCode6) as DiagnosisCode6, 
+						Max(a.DiagnosisCode6POA) as DiagnosisCode6POA, 
+						Max(a.DiagnosisCode7) as DiagnosisCode7, 
+						Max(a.DiagnosisCode7POA) as DiagnosisCode7POA, 
+						Max(a.DiagnosisCode8) as DiagnosisCode8, 
+						Max(a.DiagnosisCode8POA) as DiagnosisCode8POA, 
+						Max(a.DiagnosisCode9) as DiagnosisCode9, 
+						Max(a.DiagnosisCode9POA) as DiagnosisCode9POA, 
+						Max(a.DiagnosisCode10) as DiagnosisCode10, 
+						Max(a.DiagnosisCode10POA) as DiagnosisCode10POA, 
+						Max(a.DiagnosisCode11) as DiagnosisCode11, 
+						Max(a.DiagnosisCode11POA) as DiagnosisCode11POA, 
+						Max(a.DiagnosisCode12) as DiagnosisCode12, 
+						Max(a.DiagnosisCode12POA) as DiagnosisCode12POA, 
+						Max(a.DiagnosisCode13) as DiagnosisCode13, 
+						Max(a.DiagnosisCode13POA) as DiagnosisCode13POA, 
+						Max(a.DiagnosisCode14) as DiagnosisCode14, 
+						Max(a.DiagnosisCode14POA) as DiagnosisCode14POA, 
+						Max(a.DiagnosisCode15) as DiagnosisCode15, 
+						Max(a.DiagnosisCode15POA) as DiagnosisCode15POA, 
+						Max(a.DiagnosisCode16) as DiagnosisCode16, 
+						Max(a.DiagnosisCode16POA) as DiagnosisCode16POA, 
+						Max(a.DiagnosisCode17) as DiagnosisCode17, 
+						Max(a.DiagnosisCode17POA) as DiagnosisCode17POA, 
+						Max(a.DiagnosisCode18) as DiagnosisCode18, 
+						Max(a.DiagnosisCode18POA) as DiagnosisCode18POA, 
+						Max(a.DiagnosisCode19) as DiagnosisCode19, 
+						Max(a.DiagnosisCode19POA) as DiagnosisCode19POA, 
+						Max(a.DiagnosisCode20) as DiagnosisCode20, 
+						Max(a.DiagnosisCode20POA) as DiagnosisCode20POA, 
+						Max(a.DiagnosisCode21) as DiagnosisCode21, 
+						Max(a.DiagnosisCode21POA) as DiagnosisCode21POA, 
+						Max(a.DiagnosisCode22) as DiagnosisCode22, 
+						Max(a.DiagnosisCode22POA) as DiagnosisCode22POA, 
+						Max(a.DiagnosisCode23) as DiagnosisCode23, 
+						Max(a.DiagnosisCode23POA) as DiagnosisCode23POA,  
+						Max(a.DiagnosisCode24) as DiagnosisCode24, 
+						Max(a.DiagnosisCode24POA) as DiagnosisCode24POA, 
+						Max(a.DiagnosisCode25) as DiagnosisCode25, 
+						Max(a.DiagnosisCode25POA) as DiagnosisCode25POA, 
+						Max(a.ProcedureCodeSurgical) as ProcedureCodeSurgical, 
+						Max(a.ProcedureCode1) as ProcedureCode1,
+						Max(a.ProcedureCode2) as ProcedureCode2,
+						Max(a.ProcedureCode3) as ProcedureCode3,
+						Max(a.ProcedureCode4) as ProcedureCode4,
+						Max(a.ProcedureCode5) as ProcedureCode5,
+						Max(a.ProcedureCode6) as ProcedureCode6,
+						Max(a.ProcedureCode7) as ProcedureCode7,
+						Max(a.ProcedureCode8) as ProcedureCode8,
+						Max(a.ProcedureCode9) as ProcedureCode9,
+						Max(a.ProcedureCode10) as ProcedureCode10,
+						Max(a.ProcedureCode11) as ProcedureCode11,
+						Max(a.ProcedureCode12) as ProcedureCode12,
+						Max(a.ProcedureCode13) as ProcedureCode13,
+						Max(a.ProcedureCode14) as ProcedureCode14,
+						Max(a.ProcedureCode15) as ProcedureCode15,
+						Max(a.ProcedureCode16) as ProcedureCode16,
+						Max(a.ProcedureCode17) as ProcedureCode17,
+						Max(a.ProcedureCode18) as ProcedureCode18,
+						Max(a.ProcedureCode19) as ProcedureCode19,
+						Max(a.ProcedureCode20) as ProcedureCode20,
+						Max(a.ProcedureCode21) as ProcedureCode21,
+						Max(a.ProcedureCode22) as ProcedureCode22,
+						Max(a.ProcedureCode23) as ProcedureCode23,
+						Max(a.ProcedureCode24) as ProcedureCode24,
+						Max(a.ProcedureCode25) as ProcedureCode25, 
+						Max(a.ProfitabilityCode) as ProfitabilityCode, 
+						Max(a.Region) as Region, 
+						Max(a.ServiceStartDate) as ServiceStartDate, 
+						Max(a.PlaceOfService) as PlaceOfService, 
+						Max(a.ClaimLineChargedAmount) as ClaimLineChargedAmount, 
+						Max(a.ClaimLinePaidAmount) as ClaimLinePaidAmount, 
+						Max(a.ProviderLocationCode) as ProviderLocationCode, 
+						Max(a.InNetworkCode) as InNetworkCode, 
+						Max(a.ProviderClassCode) as ProviderClassCode, 
+						Max(a.Par) as Par, 
+						Max(a.PaidServiceUnitCount) as PaidServiceUnitCount, 
+						Max(a.CopayAmount) as CopayAmount, 
+						Max(a.CoinsuranceAmount) as CoinsuranceAmount, 
+						Max(a.DeductibleAmount) as DeductibleAmount, 
+						Max(a.ApprovedAmount) as ApprovedAmount,
+						Max(a.MemberPenaltyAmount) as MemberPenaltyAmount, 
+						Max(a.CoveredExpenseAmount) as CoveredExpenseAmount, 
+						Max(a.ClaimEntryDate) as ClaimEntryDate,    
+						Max(a.PrimaryCarrierResponsibilityCode) as PrimaryCarrierResponsibilityCode,
+						Max(a.ProcesserUnitId) as ProcesserUnitId, 
+						Max(a.PackageNr) as PackageNr, 
+						Max(a.EmployerGroupDepartmentNr) as EmployerGroupDepartmentNr, 
+						Max(a.COBSavingsAmount) as COBSavingsAmount, 
+						MAX(a.BillingNPI) as BillingNPI 
+						, a.IsSingleContract ,
+						Max(a.DischargeStatus) as DischargeStatus,
+						Max(a.AdmitTypeCode) as AdmitTypeCode,
+						Max(a.DiagnosisRelatedGroup) as DiagnosisRelatedGroup, 
+						Max(a.ICDVersion) as ICDVersion,
+						Max(a.TypeOfBillCode) as TypeOfBillCode,
+						Max(a.DiagnosisRelatedGroupType) as DiagnosisRelatedGroupType,
+						Max(a.DiagnosisRelatedGroupSeverity) as DiagnosisRelatedGroupSeverity,
+						Max(a.RateCategory) as RateCategory,
+						Max(a.RateSubcategory) as RateSubcategory,
+						Max(a.RevenueCode) as RevenueCode,
+						Max(a.BenefitPaymentTierCode) as BenefitPaymentTierCode,
+						Max(a.PostDate) as PostDate,
+						Max(a.PreferredIndicator) as PreferredIndicator,
+						MAX(a.ValueFunctionCode1) as ValueFunctionCode1,
+						MAX(a.ValueFunctionCode2) as ValueFunctionCode2,
+						MAX(a.ValueFunctionCode3) as ValueFunctionCode3,
+					    a.DenialReasonCode
+						, a.DenialReasonDescription
+						, a.benefitcategorycode
+						, a.benefitcategorycodedescription
+						, a.surprisebilling
+						, a.qpaamount,
 
----bring everything into a flat most recent claim, claim line number, and claim adjustment number for analytics
-INSERT INTO [SCHEMA].[ClaimsFlat_Test]
-select b.*,
-MAX(a.Person_ID) as Person_Id
-		, MemberAddress1
-		, MemberAddress2
-		, MemberCity
-		, MemberState
-		, MemberZipCode
-		, MemberZipCode4 ,
-MAX(a.AuthorizationNr) as AuthorizationNr,
 
- OTHER FIELDS, 
- 
-MAX(a.ValueFunctionCode2) as ValueFunctionCode2,
-MAX(a.ValueFunctionCode3) as ValueFunctionCode3
-		, DenialReasonCode
-		, DenialReasonDescription
-		, benefitcategorycode
-		, benefitcategorycodedescription
-		, surprisebilling
-		, qpaamount,
-	CASE WHEN a.filetype = 'WGS' THEN MAX(a.ClaimChargedAmount) ELSE Sum(a.ClaimChargedAmount) END as Total_ClaimChargedAmount, 
-			 a.CancelOut_ClaimChargedAmt ,
-	CASE WHEN a.filetype = 'WGS' THEN MAX(a.ClaimLineChargedAmount) ELSE Sum(a.ClaimLineChargedAmount) END as Total_ClaimLineChargedAmount,
-			a.CancelOut_ClaimLineChargedAmt ,
-	CASE WHEN a.filetype = 'WGS' THEN MAX(a.BilledServiceUnitCount) ELSE Sum(a.BilledServiceUnitCount) END as Total_BilledServiceUnitCount,
-			a.CancelOut_BilledServiceUnitCnt,  
-MAX(a.ClaimPaidAmount) as Total_ClaimPaidAmount,			
-			a.CancelOut_ClaimPaidAmt ,
-MAX(a.ClaimLinePaidAmount) as Total_ClaimLinePaidAmount,		
-			a.CancelOut_ClaimLinePaidAmt ,
-MAX(a.PaidServiceUnitCount) as Total_PaidServiceUnitCount,		
-			a.CancelOut_PaidServiceUnitCnt ,
-MAX(a.CopayAmount) as Total_CopayAmount,					
-			a.CancelOut_CopayAmt ,
-MAX(a.CoinsuranceAmount) as Total_CoinsuranceAmount,			
-			a.CancelOut_CoinsuranceAmt ,
-MAX(a.DeductibleAmount) as Total_DeductibleAmount,	
-			a.CancelOut_DeductibleAmt,
-MAX(a.ApprovedAmount)	 as Total_ApprovedAmount,			
-			a.CancelOut_ApprovedAmt ,
-MAX(a.MemberPenaltyAmount) as Total_MemberPenaltyAmount,		
-			a.CancelOut_MemberPenaltyAmt ,
-MAX(a.CoveredExpenseAmount) as Total_CoveredExpenseAmount,		
-			a.CancelOut_CoveredExpenseAmt 
---INTO [DATABASE].[SCHEMA].[ClaimsFlat_Test]
- from #temp11a b
- left join SCHEMA.ClaimsSet_Test a 
- on a.claimnr = b.claimnr and a.ClaimLineNr = b.claimlinenr and a.ClaimAdjustmentNr = b.ClaimAdjustmentNr
-  group by b.ClaimNr, b.claimlinenr, b.ClaimAdjustmentNr, a.MORE_FIELDS
+					CASE WHEN a.filetype = 'WGS' THEN MAX(a.ClaimChargedAmount) ELSE Sum(a.ClaimChargedAmount) END as Total_ClaimChargedAmount, 
+							 a.CancelOut_ClaimChargedAmt ,
+					CASE WHEN a.filetype = 'WGS' THEN MAX(a.ClaimLineChargedAmount) ELSE Sum(a.ClaimLineChargedAmount) END as Total_ClaimLineChargedAmount,
+							a.CancelOut_ClaimLineChargedAmt ,
+					CASE WHEN a.filetype = 'WGS' THEN MAX(a.BilledServiceUnitCount) ELSE Sum(a.BilledServiceUnitCount) END as Total_BilledServiceUnitCount,
+							a.CancelOut_BilledServiceUnitCnt,  
+						MAX(a.ClaimPaidAmount) as Total_ClaimPaidAmount,			
+							a.CancelOut_ClaimPaidAmt ,
+						MAX(a.ClaimLinePaidAmount) as Total_ClaimLinePaidAmount,		
+							a.CancelOut_ClaimLinePaidAmt ,
+						MAX(a.PaidServiceUnitCount) as Total_PaidServiceUnitCount,		
+							a.CancelOut_PaidServiceUnitCnt ,
+						MAX(a.CopayAmount) as Total_CopayAmount,					
+							a.CancelOut_CopayAmt ,
+						MAX(a.CoinsuranceAmount) as Total_CoinsuranceAmount,			
+							a.CancelOut_CoinsuranceAmt ,
+						MAX(a.DeductibleAmount) as Total_DeductibleAmount,	
+							a.CancelOut_DeductibleAmt,
+						MAX(a.ApprovedAmount)	 as Total_ApprovedAmount,			
+							a.CancelOut_ApprovedAmt ,
+						MAX(a.MemberPenaltyAmount) as Total_MemberPenaltyAmount,		
+							a.CancelOut_MemberPenaltyAmt ,
+						MAX(a.CoveredExpenseAmount) as Total_CoveredExpenseAmount,		
+							a.CancelOut_CoveredExpenseAmt,
+						MAX(a.RenderingSpecialtyCode) as RenderingSpecialtyCode
+						,MAX(a.RenderingSpecialtyDescription) as RenderingSpecialtyDescription
+						,MAX(a.BillingSpecialtyCode) as BillingSpecialtyCode
+						,MAX(a.BillingSpecialtyDescription) as BillingSpecialtyDescription
+						,MAX(a.ALTERNATECLAIMNUMBER) as ALTERNATECLAIMNUMBER,
+						NULL as HfSpecialtyID,
+						NULL as isIP,
+						NULL as isOP,
+						NULL as isER,
+						NULL as isUrgentCare,
+						NULL as isASC,
+						NULL as EncounterID
+						--	INTO Empire.ClaimsFlat_Test
+				 from #temp11 b
+					 left join #claimsSet a											---- 2.0 End table name dependent 
+						 on a.claimnr = b.claimnr and a.ClaimAdjustmentNr = b.ClaimAdjustmentNr
+				   WHERE NOT EXISTS ( Select ClaimNr, ClaimLineNr, ClaimAdjustmentNr
+				                        FROM [Empire].[ClaimsFlat_Test] c						---- 2.0 End table name dependent 
+										 where c.claimnr = a.claimnr 
+						                      AND c.claimlinenr = a.claimlinenr 
+						                      AND c.ClaimAdjustmentNr = a.claimadjustmentnr )   ------ Only update with new claims (Claim, Adj, Line)
+					 group by b.ClaimNr, a.claimlinenr, b.ClaimAdjustmentNr, a.hfclaimid, a.FileType, a.ClaimLineStatusCode, a.IsSingleContract, a.DenialReasonCode
+							, a.DenialReasonDescription, a.benefitcategorycode, a.benefitcategorycodedescription, a.surprisebilling, a.qpaamount, a.BillingName, a.HCPCS, a.ProviderSpecialtyCode, a.ProviderContractType, a.MemberAddress1, a.MemberAddress2
+							, a.MemberCity, a.MemberState, a.MemberZipCode, a.MemberZipCode4, a.CancelOut_ClaimChargedAmt ,	a.CancelOut_ClaimPaidAmt ,a.CancelOut_ClaimLineChargedAmt ,a.CancelOut_ClaimLinePaidAmt ,a.CancelOut_PaidServiceUnitCnt ,a.CancelOut_CopayAmt 
+							, a.CancelOut_CoinsuranceAmt ,a.CancelOut_DeductibleAmt,a.CancelOut_ApprovedAmt ,a.CancelOut_MemberPenaltyAmt ,a.CancelOut_CoveredExpenseAmt ,a.CancelOut_BilledServiceUnitCnt, a.Total_ClaimChargedAmount, a.Total_ClaimLineChargedAmount, a.Total_BilledServiceUnitCount, a.Total_ClaimPaidAmount;  
+
+
+-------------OFF RAMP------------------------v
+--Delete from Empire.ClaimsSet_Test 
+	--where JobId = '' 
+	----where Jobid IN ('', '', '')
+
+
+--Delete from Empire.[ClaimsFlat_Test] 
+	--where JobId = '' 
+	----where Jobid IN ('', '', '')
+---------------------------------------------^
+
+
+------------------------- Removal of lower Adjustment Numbers ------------------------v 
+
+WITH cte AS (
+    SELECT HfClaimid, MAX(ClaimAdjustmentNr) AS mxadjnr
+    FROM Empire.ClaimsFlat_Test
+    GROUP BY HfClaimId
+			)
+		DELETE cft
+		FROM Empire.ClaimsFlat_Test cft
+		JOIN (
+				SELECT DISTINCT cf.HfClaimId, cf.ClaimAdjustmentNr
+				FROM Empire.ClaimsFlat_Test cf
+					INNER JOIN cte ON cf.HfClaimId = cte.HfClaimId
+						WHERE cf.ClaimAdjustmentNr < cte.mxadjnr
+			 ) de 
+			ON cft.HfClaimId = de.HfClaimId
+				AND cft.ClaimAdjustmentNr = de.ClaimAdjustmentNr;
+
+----------------------------------------------------------------------------------------------------
+
+update Main.Jobs 
+set JobEnd = getdate()
+where  JobId = @JobId;
+--Unsure what this was
+ -- Now that we have JobId, update raw records
+--update [DATABASE].[Sp_ClaimsMoosh] set JobId = @JobId where JobId = 0;  
+
+
+--Confirm ClaimRaw records exist to proceed
+ --select @NrRowsInserted = count(1) from [Empire].[Sp_ClaimsMoosh]
+ --where JobId = @JobId;
+
+end TRY
+
+BEGIN CATCH  
+	EXEC main.SP_Db_errors
+
+END CATCH  
+
+
+END
 
