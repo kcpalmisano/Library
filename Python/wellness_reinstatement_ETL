@@ -1,0 +1,294 @@
+## ALL libraries 
+import pandas as pd
+import sqlalchemy as sa
+from sqlalchemy.orm import sessionmaker 
+import os
+import pyodbc
+import gc
+import inspect
+import datetime 
+from datetime import date, timedelta
+import logging
+import sys
+import time
+from smtplib import SMTP
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from pathlib import Path 
+import configparser
+from logging.handlers import RotatingFileHandler
+import time
+
+
+current_time = time.time()
+start_time = time.monotonic()
+today = date.today()
+
+## Specific Functions 
+
+def merge_data(left_df, right_df, how='inner', on=None, left_on=None, right_on=None):
+  """
+  Merges two DataFrames based on specified parameters.
+
+  Args:
+      left_df (pd.DataFrame): The left DataFrame for the merge.
+      right_df (pd.DataFrame): The right DataFrame for the merge.
+      how (str, optional): The type of merge to perform. Defaults to 'inner'.
+          Valid options include 'inner', 'left', 'right', and 'outer'.
+      on (str or list, optional): Columns to use for merging in both DataFrames.
+          If not specified, left_on and right_on must be provided.
+      left_on (str or list, optional): Columns in the left DataFrame to use for merging.
+      right_on (str or list, optional): Columns in the right DataFrame to use for merging.
+
+  Returns:
+      pd.DataFrame: The merged DataFrame resulting from the operation.
+  """
+
+  if on is not None:
+    merged_df = left_df.merge(right_df, how=how, on=on)
+  else:
+    merged_df = left_df.merge(right_df, how=how, left_on=left_on, right_on=right_on)
+
+  return merged_df        
+    
+@timeit
+def close_all_connections():
+    """
+    This function will close all open connections
+    """
+    for obj in gc.get_objects():
+        if inspect.ismodule(obj):
+            for name in dir(obj):
+                if name == "engine":
+                    engine = getattr(obj, name)
+                    if isinstance(engine, sa.engine.Engine):
+                        engine.dispose()
+                elif name == "conn":
+                    conn = getattr(obj, name)
+                    if conn is not None and isinstance(conn, pyodbc.Connection):
+                        try:
+                            conn.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+                elif name == "con":
+                    con = getattr(obj, name)
+                    if con is not None and isinstance(con, pyodbc.Connection):
+                        try:
+                            con.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+                elif name == "cursor":
+                    cursor = getattr(obj, name)
+                    if cursor is not None and isinstance(cursor, pyodbc.Cursor):
+                        try:
+                            cursor.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+##***************************
+
+####Connection 
+@timeit
+def connect_to_sql_server(server_name, database_name):
+    # connect via pyodbc
+    conn = pyodbc.connect(f'Driver={{SQL Server}};Server={server_name};Database={database_name};Trusted_Connection=yes;')
+    
+    # connect via sqlalchemy
+    con = sa.create_engine(f'mssql://{server_name}/{database_name}?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server', fast_executemany=True)
+    
+    return conn, con
+
+# Connection to server -> SERVER   db -> DATABASE
+conn, con = connect_to_sql_server('SERVER', 'DATABASE')
+cursor = conn.cursor()
+conn.autocommit = True
+
+Session = sessionmaker(bind=con)
+session = Session()
+
+
+# Job setup
+print('#------------------ ETL Started-------------------#', today, current_time)
+#####################################---------------------------------------------------  Start of Code
+#!!!
+
+# SQL queries to fetch data from the database
+
+claims_df = pd.read_sql("""
+SELECT DISTINCT
+  CAST(PERSON_ID AS varchar) AS claim_personID,
+  CAST(ServiceStartDate AS DATE) AS ServiceStartDate,
+  BillingTaxId
+FROM Empire.ClaimsFlat_Test
+WHERE PERSON_ID IN (
+  SELECT person_id
+  FROM TABLE
+  WHERE GETDATE() BETWEEN START_DATE AND STOP_DATE
+  GROUP BY PERSON_ID
+)
+AND ServiceStartDate >= GETDATE() - 270
+""", con)
+
+funds_df = pd.read_sql("""
+SELECT DISTINCT
+  CAST(person_id AS varchar) AS person_id,
+  funds_enrollmentid,
+  CAST(funds_dateactive AS DATE) AS funds_dateactive,
+  CAST(funds_closedate AS DATE) AS funds_closedate,
+  funds_facilityname,
+  funds_facility,
+  CAST(funds_warningdate AS DATE) AS funds_warningdate,
+  funds_warningreason
+FROM TABLE
+WHERE funds_program = 268300000        --welness
+  AND statuscode = 268300303           --resolve
+  AND statecode = 0                    --active 
+  AND funds_warningreason = 268300002  --no usage
+""", con) 
+
+fp_df = pd.read_sql("""
+SELECT DISTINCT
+  funds_fein,
+  funds_providerorganizationid,
+  CASE WHEN funds_parentorganizationname IS NOT NULL THEN funds_parentorganizationname ELSE funds_name END AS funds_location
+FROM TABLE
+WHERE funds_fivestar = 1
+""", con) 
+
+registry_df = pd.read_sql("""
+SELECT Subscr_id, facility_name, Last_Visit
+FROM TABLE
+""", con) 
+
+flagged_df = pd.read_sql("""
+SELECT CAST(person_id as varchar) as person_id 
+FROM TABLE
+WHERE [Action] = 'No Usage'
+""", con) 
+
+
+# Merge DataFrames (assuming you have functions for merging)
+merged_df = merge_data(funds_df, claims_df, how='inner', left_on='person_id', right_on='claim_personID')
+merged_df = merge_data(merged_df, fp_df, how='left', left_on='funds_facility', right_on='funds_providerorganizationid')
+merged_df = merge_data(merged_df, registry_df, how='left', left_on='person_id', right_on='Subscr_id')
+merged_df = merge_data(merged_df, flagged_df, how='inner', on='person_id') 
+
+# Apply filtering and calculations (assuming you have functions for these)
+filtered_df = merged_df[merged_df['person_id'].notna()]  # Assuming null person_id indicates exclusion
+filtered_df = filtered_df[filtered_df['ServiceStartDate'] >= (pd.Timestamp.today() - pd.Timedelta(days=270))]
+filtered_df = filtered_df[(filtered_df['BillingTaxId'] == filtered_df['funds_fein']) & (filtered_df['funds_fein'].notna())]
+filtered_df = filtered_df[(filtered_df['funds_warningdate'].isna()) | (filtered_df['funds_warningdate'] >= (pd.Timestamp.today() - pd.Timedelta(days=90)))]
+
+#!!!
+
+well = filtered_df
+
+# Set up new columns for Dynamics integration 
+well['Source'] = 'Claims'     ###============================
+well['program'] = 'Wellness'  ###============================
+well['Notes'] = 'THIS IS A TEST NOTE'  ###============================
+well['Action'] = 'Reinstate'  ###============================
+well['funds_source'] = pd.NA
+well['funds_action'] = pd.NA
+well['funds_casenumber'] = pd.NA
+well['funds_dateofservice'] = pd.NA
+well['funds_disease'] = pd.NA
+well['funds_provider'] = pd.NA
+well['funds_facility'] = pd.NA
+well['funds_futureMomsRegistrationDate'] = pd.NA
+well['funds_name'] = pd.NA
+well['funds_person'] = pd.NA
+well['funds_program'] = pd.NA
+well['funds_rebateeligible'] = pd.NA
+well['funds_score'] = pd.NA
+well['funds_procedure_multiselect'] = pd.NA
+well['funds_issecondaryinsurance'] = pd.NA
+well['funds_episodesid'] = pd.NA
+well['errormessage'] = pd.NA
+well['errorcreatedon'] = pd.NA
+well['d365syncedon'] = pd.NA
+well['createdon'] = pd.NA
+                
+
+# Set up for Dynamics push
+# Drop unneeded columns
+well = well.drop(['funds_dateactive',
+      'funds_closedate', 'funds_facilityname', 
+      'funds_warningdate', 'funds_warningreason', 'claim_personID',
+      'ServiceStartDate', 'BillingTaxId', 'funds_fein',
+      'funds_providerorganizationid', 'funds_location', 'Subscr_id',
+      'facility_name', 'Last_Visit'], axis=1)        
+        
+# Rename for proper field name
+well = well.rename(columns={'funds_enrollmentid':'funds_engagement', 'Notes':'funds_note'})
+        
+
+# # Using boolean indexing with negation 
+# def is_not_empty(value):
+#     return not pd.isna(value) and value != ''  # Check for null, NaN, and empty string
+
+        
+
+#==========================================================#!!!
+# Episode history set up
+
+# Select desired columns using Method 1
+desired_columns = ["person_id", "funds_enrollmentid", "Action", "Notes"]
+well_history = filtered_df[desired_columns]
+
+# Set up columns
+well_history['Program'] = 'Wellness'
+well_history['Source'] = 'Claims'
+
+# Rename column
+well_history = well_history.rename(columns={'funds_enrollmentid':'Engagement'})
+
+
+#############################################!!!
+
+from datetime import datetime
+#Add updated date
+today = datetime.today().date()
+well_history['datecreated'] = pd.to_datetime(today)
+
+
+################################################
+# test = wellness_fin.head(10)
+################################################
+
+#!!!
+### Insert data into SQL Server
+print('Wellness reinstatments Complete')  
+
+## code to upload dataframe to SQL Server
+try:
+    conn.commit()    
+    well_history.to_sql( 'TABLE', con, schema='SCHEMA', index=False, chunksize=1000, if_exists='append')   
+    print("History uploaded successfully!")
+    
+except Exception as e:
+    print("Error uploading History:", e)
+    
+finally:
+    print("Wellness Warnings History Loaded")
+    
+try:
+   conn.commit()    
+   well.to_sql( 'TABLE', con, schema='SCHEMA', index=False, chunksize=1000, if_exists='append')   
+   print("Wellness Warnings uploaded successfully!")
+    
+except Exception as e:
+   print("Error uploading Warnings:", e)
+
+finally:
+   print("Wellness Warnings Loaded")    
+
+#close all connections
+try:
+    close_all_connections()
+    session.close()
+
+except:
+    print('session close failed')
+
+finally:
+    print('session closed')  
