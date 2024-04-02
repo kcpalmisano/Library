@@ -1,0 +1,196 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Jan 31 11:24:28 2023
+
+@author: cpalmisano
+"""
+
+import pandas as pd
+import gc
+import inspect
+from datetime import  date
+import pyodbc
+import sqlalchemy
+from sqlalchemy.orm import sessionmaker 
+import math
+import geopy.distance
+from geopy.distance import great_circle
+
+#!!!
+
+def close_all_connections():
+    """
+    This function will close all open connections
+    """
+    for obj in gc.get_objects():
+        if inspect.ismodule(obj):
+            for name in dir(obj):
+                if name == "engine":
+                    engine = getattr(obj, name)
+                    if isinstance(engine, sqlalchemy.engine.Engine):
+                        engine.dispose()
+                elif name == "conn":
+                    conn = getattr(obj, name)
+                    if conn is not None and isinstance(conn, pyodbc.Connection):
+                        try:
+                            conn.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+                elif name == "con":
+                    con = getattr(obj, name)
+                    if con is not None and isinstance(con, pyodbc.Connection):
+                        try:
+                            con.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+                elif name == "cursor":
+                    cursor = getattr(obj, name)
+                    if cursor is not None and isinstance(cursor, pyodbc.Cursor):
+                        try:
+                            cursor.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+
+
+####Connection 
+def connect_to_sql_server(server_name, database_name):
+    # connect via pyodbc
+    conn = pyodbc.connect(f'Driver={{SQL Server}};Server={server_name};Database={database_name};Trusted_Connection=yes;')
+    
+    # connect via sqlalchemy
+    con = sqlalchemy.create_engine(f'mssql://{server_name}/{database_name}?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server', fast_executemany=True)
+    
+    return conn, con
+
+###------------------------------------------------------ #!!!
+
+# connection to server -> SERVER   db -> DATABASE
+conn, con = connect_to_sql_server('SERVER', 'DATABASE')
+cursor = conn.cursor()
+conn.autocommit = True 
+
+con = sqlalchemy.create_engine('mssql://SERVER/DATABASE?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server', fast_executemany=True)    
+Session = sessionmaker(bind=con)
+session = Session()   
+
+# SQL query to fetch data from the database
+coe_locs = pd.read_sql("""
+SELECT funds_coetype, funds_coetypename, funds_name, funds_address1_postalcode as zip, funds_fein
+, funds_address1_line1 + ' ' + funds_address1_city + ', ' +  funds_address1_stateorprovince + ' ' + funds_address1_postalcode  as Address
+, NULL as latitude, NULL as longitude
+FROM TABLE
+  WHERE funds_parentorganization IS NULL and funds_coetype IS NOT NULL
+""", con) 
+
+
+#!!!
+from geopy.geocoders import Nominatim
+
+# Initialize Nominatim geocoder with user_agent header
+geolocator = Nominatim(user_agent="coe_facilities")
+
+# Extract addresses and convert to strings
+addresses = coe_locs['Address'].apply(str).tolist()
+
+# Create an empty list to store zip codes within 50 miles radius
+zip_codes_in_radius = []
+
+## 1-1 hopsital lat/long from google maps based on address
+#Current hardcode as of 2/15/2024
+hospitals = [
+(42.250606, -71.078271), 
+(40.462253, -79.946908),
+(42.466401, -71.123150),
+(40.805544, -73.961967),
+(41.774682, -72.699529),
+(26.187342, -80.120705),
+(40.428361, -79.748843),
+(41.552679, -73.035679),
+(40.984672, -74.100776),
+(40.435682, -79.766520),
+(42.111765, -80.079800),
+(40.635625, -80.064512),
+(40.635625, -80.064512),
+(40.770071, -73.987758),
+(26.195650, -80.133656),
+(42.400935, -71.279475),
+(42.330175, -71.107233),
+(39.957740, -75.200006),
+(39.944693, -75.156461),
+(39.944693, -75.156461) ]
+
+
+## one-to-one mapping of lat/long
+coe_locs[["latitude", "longitude"]] = pd.DataFrame(hospitals, columns=["latitude", "longitude"])
+
+
+df = coe_locs
+
+#!!!
+#load in all zip codes 
+zips = pd.read_excel(r'C:/PATH/Ad Hoc/zip_codes.xlsx')
+
+
+#fill missing zeros in zipcode due to Excel being bitchy
+zips['zip'] = zips['zip'].apply(lambda x: '{:05d}'.format(x))
+
+
+# Initialize Nominatim geocoder with user_agent header
+geocoder = Nominatim(user_agent="coe_facilities")
+
+# Define the 50-mile radius in kilometers
+radius_km = 50
+
+# Iterate through each address
+for index, row in df.iterrows():
+    address_lat = row["latitude"]
+    address_long = row["longitude"]
+
+    # Select potential zip codes efficiently
+    filtered_zips = zips[
+        (zips["latitude"] >= address_lat - radius_km / 111.11) &
+        (zips["latitude"] <= address_lat + radius_km / 111.11) &
+        (zips["longitude"] >= address_long - radius_km / (111.11 * math.cos(address_lat * math.pi / 180))) &
+        (zips["longitude"] <= address_long + radius_km / (111.11 * math.cos(address_lat * math.pi / 180)))
+    ]
+
+    # Calculate distances and filter within radius
+    zip_distances = []
+    for i, zip_row in filtered_zips.iterrows():
+        zip_lat = zip_row["latitude"]
+        zip_long = zip_row["longitude"]
+        distance = great_circle((address_lat, address_long), (zip_lat, zip_long)).km
+        if distance <= radius_km:
+            zip_distances.append((distance, zip_row["zip"]))
+
+    # Sort zip codes by distance and store as comma-separated string
+    zip_distances.sort(key=lambda x: x[0])
+    df.loc[index, "zip_codes_in_radius"] = ", ".join([str(code) for _, code in zip_distances])
+
+from datetime import datetime
+
+#Add updated date
+today = datetime.today().date()
+df['date_updated'] = pd.to_datetime(today)
+
+
+#!!!
+### Insert data into SQL Server
+print('Catchment Complete')  
+
+conn.commit()                 #code to upload dataframe to SQL Server
+df.to_sql( 'TABLE', con, schema='SCHEMA', index=False, chunksize=1000, if_exists='replace')   
+
+print("Catchment Loaded")
+
+
+#close all connections
+try:
+    close_all_connections()
+    session.close()
+
+except:
+    print('session close failed')
+
+finally:
+    print('session closed')
