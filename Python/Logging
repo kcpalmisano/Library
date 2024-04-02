@@ -1,0 +1,469 @@
+
+import pandas as pd
+import sqlalchemy as sa
+from sqlalchemy.orm import sessionmaker 
+import os
+import pyodbc
+import gc
+import inspect
+import datetime 
+from datetime import date, timedelta
+import logging
+import sys
+import time
+from smtplib import SMTP
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from pathlib import Path 
+import configparser
+from logging.handlers import RotatingFileHandler
+import time
+
+# sys.path.insert(1, '//PATH/DataEngLib/Logging/') 
+
+
+current_time = time.time()
+start_time = time.monotonic()
+today = date.today()
+
+# #!!!
+# ###  ------------------------------- Wrappers -------------------------------------
+#### @wraps for making sure the function inherits its name and properties
+from functools import wraps
+
+def timeit(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        end = time.perf_counter()
+        print(f'{func.__name__} took {end - start:.6f} seconds to complete')
+        return result
+    return wrapper
+
+# ##################################################### *******************************************************UPDATE THIS FUNCTION *********************************************
+
+# def start_sql_job_report(cursor, job_type:str, source:str='python', test_job:bool=False, job_desc:str='JOB_NAME'):
+#     """
+#         Inserts into the main.jobs table a new job for the current process. Returns the job id of the newly created job
+#         NOTE: the initial start time will be set to the current time, but in order to have the job close out properly, then you need to 
+#         call the .close_out_job_log() method once your process has finished running. This will add an end time for the process, which is how we determine
+#         whether a job finished running or not
+        
+#         Parameters
+#         ----------
+#             cursor: pyodbc.cursor
+#                 Cursor object that connects to DbHfProd to execute queries
+#             job_type:str
+#                 name of job which will be added ot the job_type column in main.jobs
+#             source_folder: str 
+#                 String describing the source for the job if relevant. Gets added to the job description. Empty by default
+#             test_job:bool
+#                 Inserts True/false into the isTest column if this is a test run that is not writing to the "prod" schema. Defaults to False.
+#             job_desc:str
+#                 This is actually more of a field describind the frequency of the job (i.e. weekly process, daily). Defaults to Ad Hoc currently
+
+            
+#         @params optional: the job type defaulted to denote an invoice and the job description, defaulted to weekly
+#         Returns
+#         ---------
+#             job_id:int    
+#                 the job id of the newly initiated job
+#     """
+#     sql = """SET NOCOUNT ON;
+#               INSERT INTO DbHfProd.Main.Jobs
+#               (JobType, JobStart, JobDescription, IsTest) 
+#               VALUES
+#               ('{0}','{1}', '{2}', '{3}');
+#               SELECT scope_identity();
+#           """.format(job_type, datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), source +'_'+job_desc, test_job)
+          
+#     job_id = int(cursor.execute(sql).fetchval())
+#     return job_id
+
+
+# @timeit
+# class StreamToLogger(object):
+#     """
+#     Fake file-like stream object that redirects writes to a logger instance.
+#     # We'd like stdout and stderr to go to the log file we're rotating.
+#     # https://stackoverflow.com/questions/19425736/how-to-redirect-stdout-and-stderr-to-logger-in-python
+#     """
+#     def __init__(self, logger, level):
+#         self.logger = logger
+#         self.level = level
+#         self.linebuf = ''
+
+#     def write(self, buf):
+#         for line in buf.rstrip().splitlines():
+#           self.logger.log(self.level, line.rstrip())
+
+#     def flush(self):
+#         pass
+    
+# # *********** Data Eng Config  ************
+# @timeit
+# def HfDE_config():
+#     config = configparser.ConfigParser()
+#     globalConfigPath = Path('//PATH/DataEngLib/data-eng-config.ini')
+#     localConfigPath = Path(os.getcwd()) / 'jobMonitorConfig.ini'
+#     configCandidates = [globalConfigPath, localConfigPath]
+#     config.read(configCandidates)
+#     return config
+
+
+# def getNextScheduledDate(row):
+#     '''
+#     Determine what the next date should be, math or calendar dending on frequency in Main.jobMonitor     
+#     '''
+    
+#     #frequency = row.frequency
+#     prevDate = row.lastRunStart
+    
+#     if row.frequency.lower() == 'daily':
+#         return prevDate + timedelta(days=1)
+
+#     elif row.frequency.lower() == 'weekday':
+#         if prevDate.weekday() == 6 or prevDate.weekday() < 4:   
+#             return prevDate + timedelta(days=1)
+#         elif prevDate.weekday() == 4:
+#             return prevDate + timedelta(days=3)
+#         elif prevDate.weekday() == 5:
+#             return prevDate + timedelta(days=2)        
+
+#     elif row.frequency.lower() == 'weekly':
+#         return prevDate + timedelta(days=7)
+
+#     elif row.frequency.lower() == 'monthly':
+#         if prevDate.month == 12:
+#             nextMonth = 1
+#             nextYear = prevDate.year + 1
+#         else:
+#             nextMonth = prevDate.month + 1
+#             nextYear = prevDate.year
+
+#         nextDate = str(nextYear) + '-' + str(nextMonth) + '-' + str(prevDate.day)
+#         return datetime.strptime(nextDate, '%Y-%m-%d')
+
+#     elif row.frequency.lower() == 'quarterly':
+#         if prevDate.month > 9:
+#             nextMonth = prevDate.month - 8
+#             nextYear = prevDate.year + 1
+#         else:
+#             nextMonth = prevDate.month + 3
+#             nextYear = prevDate.year
+
+#         nextDate = str(nextYear) + '-' + str(nextMonth) + '-' + str(prevDate.day)
+#         return datetime.strptime(nextDate, '%Y-%m-%d')  
+
+#     elif row.frequency.lower() == 'annual':
+#         return prevDate + timedelta(days=365)    
+
+#     else:
+#         return None
+
+
+# ################################# *******************************************************UPDATE THIS FUNCTION *********************************************
+# def notify(row, config):
+#     '''   
+#     Report results of job monitoring to the people in Main.jobMonitor.notificationGroup.  
+#     '''
+#     #logging.info('Sending notifications')
+#     notificationSent = False
+#     msg = """From: From Person <EMAIL@gmail.com>
+#     To: To Person <EMAIL@gmail.com>
+#     MIME-Version: 1.0
+#     Content-type: text/html
+#     Subject: SMTP HTML e-mail test
+
+#     FutureMoms_test had an issue
+
+#     <b>This is HTML message.</b>
+#     <h1>This is headline.</h1>
+#     """
+    
+#     notificationBody = ''
+#     jobDescriptor = row.jobType + '-' + row.fileType
+#     reportHasError = row.hasError and not row.ignoreHasError
+#     reportMissedJob = row.missedJobFlag and not row.ignoreMissedJob
+#     reportNoJobEnd = row.noJobEndFlag and not row.ignoreNoJobEnd
+    
+#     if reportHasError is True:
+#         newMessage = '{0}: has reported an error. In job ID {1}\r\n'.format(jobDescriptor, row.lastJob)
+#         notificationBody = notificationBody + newMessage
+    
+#     if reportMissedJob is True:
+#         newMessage = '{0}: did not run on schedule. It was expected to run at {1}\r\n' \
+#             .format(jobDescriptor, datetime.strftime(row.nextJobStart, '%Y-%m-%d %H:%M:%S') )
+#         notificationBody = notificationBody + newMessage
+    
+#     if reportNoJobEnd is True:
+#         newMessage = '{0}: has not completed. It started at {1} and was expected to complete within {2} minutes\r\n' \
+#             .format(jobDescriptor, datetime.strftime(row.lastRunStart, '%Y-%m-%d %H:%M:%S'), row.runGracePeriodMinutes)
+#         notificationBody = notificationBody + newMessage
+
+#     #smtplib does not support logging, all information is written out to stdout & stderr, see .out file if available.
+#     msg = MIMEMultipart()
+#     msg['From'] = config['SMTP']['Sender']
+#     msg['To'] = row['notificationGroup']
+#     msg['Subject'] = 'Test of Notifications: ' + row['jobType'] + '-' + row['fileType']
+#     msg.attach(MIMEText(notificationBody))
+#     logger.debug(msg)
+    
+#     if notificationBody != '':
+#         logger.warn('Notification {0} sent to {1}'.format(notificationBody, row.notificationGroup))
+#         try:
+#             with SMTP(config['SMTP']['MailServer'], port=25) as smtp:
+#                 smtp.set_debuglevel(2)
+#                 #print(smtp.noop())
+#                 notificationSent = True
+#         except Exception as error:
+#             print('SMTP Error! {0}'.format(error))
+#             notificationSent = False
+#     else:
+#         logger.info('No notification for {0}. Exclusions: {1}'.format(
+#             row.jobType, row.ignoreHasError and row.ignoreMissedJob and row.ignoreNoJobEnd))
+#     return notificationSent
+
+# logger_initialized = False  # Variable to track if the logger is already initialized
+
+
+# def initLogger(appName):
+#     global logger_initialized
+
+#     if logger_initialized:
+#         return logging.getLogger(appName)  # Return the existing logger
+
+#     path_exception = None
+
+#     # Try to set log file path and fall back if you can't
+#     try:
+#         logFileName = Path('//PATH/DataEngLib/Logging/' + os.path.basename(__file__)).with_suffix('.log')
+#     except Exception as error:
+#         logFileName = 'jobmonitor_app_path_exception.log'
+#         path_exception = error
+
+#     # Create log handlers
+#     logFileHandler = RotatingFileHandler(
+#         filename=logFileName,
+#         maxBytes=int(config['LOG']['fileSizeBytes']),
+#         backupCount=int(config['LOG']['fileCount']),
+#         encoding=config['LOG']['encoding']
+#     )
+
+#     # Set log formatter from config
+#     logFormat = config['LOG']['format'].format(
+#         levelname='%(levelname)s',
+#         name='%(name)s',
+#         asctime='%(asctime)s',
+#         message='%(message)s'
+#     )
+
+#     # Create application logger for our use. Set level then attach formatter and log file handler.
+#     logger = logging.getLogger(appName)
+#     logger.setLevel(int(config['LOG']['level']))
+#     logFileHandler.setFormatter(logging.Formatter(logFormat))
+
+#     # Exclude specific log messages from the logger
+#     excluded_logs = [
+#         'Row %r',
+#         'Message: %r',
+#         'Arguments: %r',
+#     ]
+#     for log in excluded_logs:
+#         logger.addFilter(lambda record, log=log: log not in record.getMessage())
+
+#     # Add the log file handler to the existing handlers of the logger
+#     logger.addHandler(logFileHandler)
+
+#     logger.info('**************Begin logging Job Monitoring*********************')
+
+#     # Send stdout, stderr to our existing logger with appropriate log level.
+#     sys.stdout = StreamToLogger(logger, logging.INFO)
+#     sys.stderr = StreamToLogger(logger, logging.ERROR)
+
+#     logger_initialized = True  # Set the flag to indicate that the logger is initialized
+
+#     if path_exception is not None:
+#         logger.error('Error finding logging path: ' + str(path_exception))
+
+#     return logger
+
+
+
+# def create_job_details_log(cursor, job_id:int, job_detail_info:str, test:bool = False):
+#     """
+#         Creates a jobdetails log with the job id and the description including the job type (summary, load file, summary details) and the filename
+        
+#         Parameters:
+#         ----------
+#         cursor: pyodbc.cursor
+#             Cursor object that connects to DbHfProd to execute queries
+#         job_id:int
+        
+#         ##TO BE ADDED LATER (?)
+#         row_count_nr:int
+#             the row count number that can be passed in. It defaults to -1 if this is a field that was not passed in. 
+        
+        
+#         Returns
+#         --------
+#         1 if successful
+#         0 plus a print message if there was a failure
+#     """
+#     if test:
+#         test_prefix = 'TEST_'
+#     else:
+#         test_prefix = ''
+#     try:
+#         sql = """SET NOCOUNT ON;
+#                 INSERT INTO DbHfProd.Main.JobDetails
+#                 (jobId,JobDetailInfo)
+#                 VALUES
+#                 ({0},'{1}');
+#                 """.format(job_id, test_prefix+job_detail_info)
+#         cursor.execute(sql)
+    
+#         # print(str(job_id) + ": " + filename + " summary details created")
+#         return 1
+#     except Exception as e:
+#         print('Error occurred in creating job details: ' + str(e))
+#         return 0
+    
+   
+# def close_out_job_log(cursor, job_id:int):
+#     """ 
+#         Will close out a job by updating job end to the current time
+        
+#         Parameters:
+#         -----------
+#         cursor: pyodbc.cursor
+#             Cursor object that connects to DbHfProd to execute queries
+#         job_id:int 
+#             job id of the job that is being closed out
+#     """
+#     sql = """SET NOCOUNT ON;
+#             UPDATE DbHfProd.Main.Jobs
+#             SET JobEnd = '{0}'
+#             WHERE JobId = {1};
+#         """.format(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), job_id)
+#     cursor.execute(sql)
+
+@timeit
+def merge_data(left_df, right_df, how='inner', on=None, left_on=None, right_on=None):
+  """
+  Merges two DataFrames based on specified parameters.
+
+  Args:
+      left_df (pd.DataFrame): The left DataFrame for the merge.
+      right_df (pd.DataFrame): The right DataFrame for the merge.
+      how (str, optional): The type of merge to perform. Defaults to 'inner'.
+          Valid options include 'inner', 'left', 'right', and 'outer'.
+      on (str or list, optional): Columns to use for merging in both DataFrames.
+          If not specified, left_on and right_on must be provided.
+      left_on (str or list, optional): Columns in the left DataFrame to use for merging.
+      right_on (str or list, optional): Columns in the right DataFrame to use for merging.
+
+  Returns:
+      pd.DataFrame: The merged DataFrame resulting from the operation.
+  """
+
+  if on is not None:
+    merged_df = left_df.merge(right_df, how=how, on=on)
+  else:
+    merged_df = left_df.merge(right_df, how=how, left_on=left_on, right_on=right_on)
+
+  return merged_df        
+    
+@timeit
+def close_all_connections():
+    """
+    This function will close all open connections
+    """
+    for obj in gc.get_objects():
+        if inspect.ismodule(obj):
+            for name in dir(obj):
+                if name == "engine":
+                    engine = getattr(obj, name)
+                    if isinstance(engine, sa.engine.Engine):
+                        engine.dispose()
+                elif name == "conn":
+                    conn = getattr(obj, name)
+                    if conn is not None and isinstance(conn, pyodbc.Connection):
+                        try:
+                            conn.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+                elif name == "con":
+                    con = getattr(obj, name)
+                    if con is not None and isinstance(con, pyodbc.Connection):
+                        try:
+                            con.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+                elif name == "cursor":
+                    cursor = getattr(obj, name)
+                    if cursor is not None and isinstance(cursor, pyodbc.Cursor):
+                        try:
+                            cursor.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+##***************************
+
+####Connection 
+@timeit
+def connect_to_sql_server(server_name, database_name):
+    # connect via pyodbc
+    conn = pyodbc.connect(f'Driver={{SQL Server}};Server={server_name};Database={database_name};Trusted_Connection=yes;')
+    
+    # connect via sqlalchemy
+    con = sa.create_engine(f'mssql://{server_name}/{database_name}?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server', fast_executemany=True)
+    
+    return conn, con
+
+#***************************************All the setup********************************* UPDATE EMAIL HERE ******************#
+# Get the current date and time once for the job instead of calling it on every loop.
+# maintainer = 'EMAIL@gmail.com'
+# appName = Path('//PATH/DataEngLib/Logging/').stem
+
+# # Create logger
+# logger = logging.getLogger(appName)
+# logger.setLevel(logging.DEBUG)
+
+# # Set up configuration
+# config = HfDE_config()
+# SQLProdDB = config['SQL']['Prod']
+
+# # Initialize logger
+# logger = initLogger(appName)
+
+# Connection to server -> SERVER   db -> DATABASE
+conn, con = connect_to_sql_server('SERVER', 'DATABASE')
+cursor = conn.cursor()
+conn.autocommit = True
+
+Session = sessionmaker(bind=con)
+session = Session()
+
+
+# Job setup
+print('#------------------ ETL Started-------------------#', today, current_time)
+##########################------------------------------------------------------- UPDATE TITLES HERE ---------------------
+# job_type = 'JOB NAME'
+# job_id = start_sql_job_report(cursor, job_type, job_desc='JOB DESCRIPT')
+# create_job_details_log(cursor, job_id, job_detail_info='JOB DETAILS')
+
+#####################################---------------------------------------------------  Start of Code
+#!!!
+
+#close all connections
+try:
+    close_all_connections()
+    session.close()
+
+except:
+    print('session close failed')
+
+finally:
+    print('session closed')             
+                       
