@@ -1,0 +1,272 @@
+CREATE PROCEDURE [sp_Wellness_flags]
+(
+       @JobDescription                   varchar(100)  = 'Wellness Warnings Flags',
+       @PeriodFrom                       date          = null,
+       @PeriodTo                         date          = null,
+       @FileName                         varchar(125)  = null,
+       @DebugFlag                        int           = 0
+)
+as
+begin
+begin try
+
+
+       -- Do not return the count of rows;
+       set nocount on;
+
+       -- Declare and initialize variables.
+       declare
+              @DatetimeStamp                    datetime = getdate(),
+              @spName                           varchar(100) = 'Wellness Warnings Flags',
+              @JobId                            int,
+              @NrRowsInserted                   int;
+
+       -- Set default values for parameters.
+       select
+              @PeriodFrom = case when @PeriodFrom is null then @DatetimeStamp else @PeriodFrom end,
+              @PeriodTo = case when @PeriodTo is null then @DatetimeStamp else @PeriodTo end;
+
+       --
+       -- Check if the ETL job was already run for the same file(s).
+       --
+       if exists
+       (
+              select 1
+              from Main.Jobs
+              where
+                     JobType = 'Wellness_flags' and
+                     JobDescription = @JobDescription and
+                     PeriodFrom = @PeriodFrom and
+                     PeriodTo = @PeriodTo       -- Job migh have not finished.
+       )
+       begin
+              return;
+       end;
+
+       -- Record job start.
+       insert into Main.Jobs 
+       (
+              --JobId identity(1, 1),
+              JobType,
+              JobStart,
+              JobEnd,
+              PeriodFrom,
+              PeriodTo,
+              JobDescription,
+              FileName             
+       )
+       values
+       (
+              @spName,
+              @DatetimeStamp,
+              null,
+              @PeriodFrom,
+              @PeriodTo,
+              @JobDescription,
+              @FileName
+       );
+
+       select 
+              @JobId = scope_identity();
+
+
+/***************************************************************************************************************************************/
+
+--------------------------------- Data 'Universe' Creation -------------------------------------
+Drop table if exists #WELLNESS;
+
+WITH cte_elig AS (    -------------Eligibility----v
+    SELECT
+        person_id
+        ,MAX(STOP_DATE) AS recent_date
+    FROM EligMedical WITH (NOLOCK)
+		WHERE GETDATE() BETWEEN START_DATE AND STOP_DATE
+		GROUP BY PERSON_ID
+),
+cte_elig_plan AS (
+	SELECT
+		ep.person_id
+		,CAST(ep.recent_date AS DATE) AS recent_date
+		,em.PLAN_DESCRIPTION AS plan_name
+	FROM cte_elig ep WITH (NOLOCK)
+	  LEFT JOIN EligMedical em ON em.PERSON_ID = ep.PERSON_ID AND em.STOP_DATE = CAST(ep.recent_date AS DATE)
+		WHERE em.PLAN_DESCRIPTION IS NOT NULL
+			AND GETDATE() BETWEEN [START_DATE] AND STOP_DATE
+),
+cte_elgtemp AS (
+    SELECT
+        DISTINCT es.person_id
+		,CAST([start_date] AS DATE) AS [start_date]
+        ,CAST([stop_date] AS DATE) AS [stop_date]
+        ,ep.plan_name
+    FROM vwEligMedicalSimple es WITH (NOLOCK)
+    LEFT JOIN cte_elig_plan ep WITH (NOLOCK) ON ep.person_id = es.person_id
+    WHERE es.stop_date > GETDATE()         --------^
+),
+cte_primary_care AS (
+    SELECT HfSpecialtyId
+      FROM HfSpecialtyId
+		WHERE AttributionLevel = 1    --- 3, 41, 46, 48, 65, 74, 88, 130, 139
+),
+cte_primary_care_ids AS (
+    SELECT sm.HfSpecialtyId 
+			,sm.SpecialtyCode 
+	    FROM specialtymap sm
+	 INNER JOIN cte_primary_care id ON id.HfSpecialtyId = sm.HfSpecialtyId
+)
+SELECT DISTINCT  -- Create the final result
+    a.person_id
+    ,ServiceStartDate
+    ,BillingTaxId
+    ,fp.funds_fein AS fundstaxid
+    ,fp.funds_location AS funds_name
+    ,funds_dateactive
+    ,et.[start_date]
+    ,et.[stop_date] 
+	,et.plan_name
+    ,rl.Last_Visit
+    ,rl.Next_Appt
+    ,CAST(NULL AS DATE) AS [date]         -- add date column for tracking
+    ,CAST(NULL AS VARCHAR) AS [JobId]      -- add jobid column for tracking
+INTO #WELLNESS                            
+ FROM (				    -- Get distinct columns from Claims table
+    SELECT DISTINCT 
+        CAST(PERSON_ID AS varchar) AS claim_personID
+        ,PaidDate
+        ,ServiceStartDate
+        ,ServiceEndDate
+        ,ClaimEntryDate
+        ,RenderingName
+		,Claimnr
+        ,CAST(BillingNPI AS INT) AS BillingNPI
+        ,BillingName
+        ,CAST(BillingTaxId AS INT) AS BillingTaxId
+        ,CAST(GroupNr AS INT) AS GroupNr
+        ,CAST(HfSpecialtyId AS INT) AS HfSpecialtyId
+    FROM ClaimsFlat WITH (NOLOCK)
+		WHERE ServiceStartDate >= DATEADD(MONTH, -9, GETDATE())
+			AND (PlaceOfService = '11' OR PlaceOfService = '22')
+		) b
+INNER JOIN (
+    SELECT DISTINCT      -- Get distinct columns from [DbHfProd].d365.funds_enrollment table
+        CAST(person_id AS varchar) AS person_id
+        ,funds_sourcename
+        ,CAST(funds_dateactive AS DATE) AS funds_dateactive
+        ,CAST(funds_closedate AS DATE) AS funds_closedate
+        ,funds_facilityname
+		,funds_facility
+        ,funds_outreach
+        ,CAST(funds_warningdate AS DATE) AS funds_warningdate
+        ,funds_warningreason
+    FROM funds_enrollment WITH (NOLOCK)
+    WHERE funds_program = 268300000		---wellness
+         AND statuscode = 268300305		---Participating 
+          AND statecode = 0				---Active
+		   AND (datediff(day, funds_dateactive, getdate()) > 180) ---check to make sure they have been in the program for AT LEAST 6 months 
+			)
+			a ON a.person_id = b.claim_personID
+ LEFT JOIN 
+	(SELECT Subscr_id,
+			CAST(Last_Visit AS DATE) AS Last_Visit
+			,CAST(Next_Appt AS DATE) AS Next_Appt
+				FROM Registry_List WITH (NOLOCK) 
+	) rl 
+		ON rl.Subscr_id = a.person_id
+ LEFT JOIN (
+    SELECT DISTINCT   -- Matching funds_fein for Tax ID comparison later
+        funds_fein
+		,funds_providerorganizationid
+        ,CASE WHEN funds_parentorganizationname IS NOT NULL 
+			THEN funds_parentorganizationname 
+				ELSE funds_name 
+					END AS funds_location
+    FROM [funds_providerorganization]
+		WHERE funds_fivestar = 1 
+			) fp  
+				ON a.funds_facility = fp.funds_providerorganizationid
+ inner JOIN cte_primary_care_ids hfid  -- Join with attribution level 1 
+	ON hfid.HfSpecialtyId = b.HfSpecialtyId
+ INNER JOIN cte_elgtemp et			 -- Join with cte_elgtemp
+	ON CAST(et.person_id as varchar) = a.person_id
+		WHERE a.Person_ID IS NOT NULL
+			and ServiceStartDate >= DATEADD(MONTH, -9, GETDATE());
+
+---------------------------------- Warning Flags ----------------------------------
+
+drop table if exists #well;
+
+SELECT 
+	person_id
+	,funds_name
+	,plan_name
+	,ServiceStartDate
+	,funds_dateactive
+	,[date]
+	,JobId
+	 ,CASE ---warnings in order of importance 
+         WHEN 
+              (w.BillingTaxId != w.fundstaxid AND w.fundstaxid IS NOT NULL)
+			  and FiveStar_Usage = 1
+        THEN 1 
+        ELSE 0							-- Checking BillingTaxId is NOT the same as the FundsTaxId, FundsTaxId is NOT NULL, claim was at a 5star location but not their assigned 5star
+		 END AS Warn_Switch				
+    ,CASE 
+        WHEN  
+             w.ServiceStartDate IS NULL 
+			AND Next_Appt is Null
+        THEN 1 
+        ELSE 0							-- the is no Scheduled appointment and no claim based visit (ServiceStartDate is NULL) 
+	    END AS Warn_ActiveNoApt		
+	,CASE 
+		WHEN 
+			Next_Appt is Null
+             AND NOT EXISTS (
+                SELECT 1
+                FROM #WELLNESS wf2
+                WHERE wf2.person_id = w.person_id
+                  AND wf2.servicestartdate >= DATEADD(DAY, -270, w.ServiceStartDate) ---getdate())
+                  AND (wf2.BillingTaxId = wf2.fundstaxid) )
+        THEN 1   
+			ELSE 0							-- Checking if funds_date_active and ServiceStartDate are both more than 270 days ago
+				END AS Warn_NoUsage		
+INTO #well
+	FROM (
+		SELECT 
+		  CASE WHEN
+			 BillingTaxId IN (
+				SELECT DISTINCT fp.funds_fein 
+				FROM [funds_providerorganization] fp
+				WHERE fp.funds_fivestar = 1   ---establishes a flag that if the claim was at a fivestar facility
+			) THEN 1
+			ELSE 0
+		END AS  FiveStar_Usage 
+		,*
+		FROM #WELLNESS
+	     ) AS w;
+
+
+----drop table [Wellness_flags];	
+Truncate table [Wellness_flags];						  --clear table of previous data
+----DROP table [Wellness_flags];
+
+INSERT INTO [Wellness_flags]		  --put information from #well2 and exclusion data into final table for use
+
+SELECT distinct w.person_id,  
+	Warn_ActiveNoApt, 
+	Warn_NoUsage,
+	Warn_Switch, 
+	funds_name,  
+	funds_dateactive,  
+	plan_name, 
+	servicestartdate,
+	[date] = GETDATE(),
+	JobId =  @JobId
+		---INTO Wellness_flags
+		FROM #well w  ;   
+
+
+/*************************************************************************************************************************/
+
+update Main.Jobs 
+set JobEnd = getdate()
+where  JobId = @JobId;
