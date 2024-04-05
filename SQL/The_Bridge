@@ -1,0 +1,1303 @@
+
+----------------------------Da Bridge--------------------------------------
+
+drop table if exists #Tempbridge1;
+---pull high adjustment number for all claims not in Claims Data
+select  ClaimNr, max(ClaimAdjustmentNr) as ClaimAdjustmentNr, ClaimLineNr
+Into #Tempbridge1
+from ClaimsClean cc
+   where NOT Exists (select claimnr from claimsdata cd
+					 where cd.claimnr = cc.claimnr						 
+					 and cd.ClaimAdjustmentNr >= cc.ClaimAdjustmentNr    
+					 and cd.ClaimLineNr = cc.ClaimLineNr)
+group by cc.claimnr, cc.ClaimLineNr ;                
+
+
+
+--create bridge of full data from missing high adjNr
+DROP TABLE IF EXISTS #bridge1
+Select  cc.* 
+  INTO #bridge1
+from #Tempbridge1 m
+  left join ClaimsClean cc 
+  on m.claimnr = cc.ClaimNr and m.claimadjustmentnr = cc.claimadjustmentnr and m.ClaimLineNr = cc.ClaimLineNr
+   order by m.claimnr, m.claimadjustmentnr, m.ClaimLineNr;
+
+
+   ---create index for speed
+create clustered index ClAdjLine ON #bridge1 (ClaimNr, ClaimAdjustmentNr, claimlinenr)		
+
+
+---pull max fields for each field
+drop table if exists #temp1;
+Select  
+ a.ClaimNr, 
+ MAX(a.ClaimAdjustmentNr) as ClaimAdjustmentNr,
+ a.claimlinenr,
+MAX(a.AuthorizationNr) as AuthorizationNr,
+MAX(a.ServiceEndDate) as ServiceEndDate,
+max(a.patientSSN) as PatientSSN, 
+Max(a.dependentNr) as DependentNr, 
+MAX(a.Person_ID) as Person_Id,
+MAX(a.MemberRelationshipCode) as MemberRelationshipCode,
+Max(a.RenderingName) as RenderingName, 
+Max(a.RenderingAddress1) as RenderingAddress1, 
+Max(a.RenderingAddress2) as RenderingAddress2, 
+Max(a.RenderingCity) as RenderingCity, 
+Max(a.RenderingState) as RenderingState, 
+Max(a.RenderingZipCode) as RenderingZipCode, 
+Max(a.RenderingZipCode4) as RenderingZipCode4,
+Max(a.BillingAddress1) as BillingAddress1, 
+Max(a.BillingAddress2) as BillingAddress2, 
+Max(a.BillingCity) as BillingCity, 
+Max(a.BillingState) as BillingState, 
+Max(a.BillingZipCode) as BillingZipCode, 
+Max(a.BillingZipCode4) as BillingZipCode4 , 
+Max(a.EPIN) as EPIN, 
+Max(a.CountyCode) as CountyCode, 
+Max(a.PatientDOB) as PatientDOB, 
+Max(a.HealthCardId) as HealthCardId, 
+Max(a.RenderingNPI) as RenderingNPI,
+Max(a.PatientName) as PatientName, 
+Max(a.PatientGender) as PatientGender, 
+Max(a.GroupNr) as GroupNr,    
+Max(a.SubgroupNr) as SubgroupNr, 
+Max(a.MemberSSN) as MemberSSN, 
+Max(a.MemberName) as MemberName,
+ClaimLineStatusCode, 
+Max(a.BillingTaxId) as BillingTaxId, 
+Max(a.ServiceRenderingType) as ServiceRenderingType,
+Max(a.AdmitDate) as AdmitDate, 
+Max(a.DischargeDate) as DischargeDate,
+Case WHEN a.PaidDate is NULL THEN Max(a.PaidDate) ELSE MAX(a.PaidDate) END as PaidDate, 
+Case WHEN a.PostDate is NULL THEN Max(a.PostDate) ELSE MAX(a.PostDate) END as PostDate,
+Max(a.InvestigationClaimCode) as InvestigationClaimCode, 
+Max(a.HCPCS_Modifier1) as HCPCS_Modifier1, 
+Max(a.HCPCS_Modifier2) as HCPCS_Modifier2,
+Max(a.HCPCS_Modifier3) as HCPCS_Modifier3,
+Max(a.HCPCS_Modifier4) as HCPCS_Modifier4,
+Max(a.Deceased) as Deceased, 
+Max(a.BilledServiceUnitCount) as BilledServiceUnitCount, 
+Max(a.ClaimChargedAmount) as ClaimChargedAmount, 
+Max(a.ClaimPaidAmount) as ClaimPaidAmount,    
+Max(a.DiagnosisCodeAdmit) as DiagnosisCodeAdmit,
+Max(a.DiagnosisCodeAdmitPOA) as DiagnosisCodeAdmitPOA, 
+Max(a.DiagnosisCodePrinciple) as DiagnosisCodePrinciple, 
+Max(a.DiagnosisCodePrinciplePOA) as DiagnosisCodePrinciplePOA, 
+Max(a.DiagnosisCode1) as DiagnosisCode1, 
+Max(a.DiagnosisCode1POA) as DiagnosisCode1POA,
+Max(a.DiagnosisCode2) as DiagnosisCode2, 
+Max(a.DiagnosisCode2POA) as DiagnosisCode2POA, 
+Max(a.DiagnosisCode3) as DiagnosisCode3, 
+Max(a.DiagnosisCode3POA) as DiagnosisCode3POA, 
+Max(a.DiagnosisCode4) as DiagnosisCode4, 
+Max(a.DiagnosisCode4POA) as DiagnosisCode4POA, 
+Max(a.DiagnosisCode5) as DiagnosisCode5, 
+Max(a.DiagnosisCode5POA) as DiagnosisCode5POA, 
+Max(a.DiagnosisCode6) as DiagnosisCode6, 
+Max(a.DiagnosisCode6POA) as DiagnosisCode6POA, 
+Max(a.DiagnosisCode7) as DiagnosisCode7, 
+Max(a.DiagnosisCode7POA) as DiagnosisCode7POA, 
+Max(a.DiagnosisCode8) as DiagnosisCode8, 
+Max(a.DiagnosisCode8POA) as DiagnosisCode8POA, 
+Max(a.DiagnosisCode9) as DiagnosisCode9, 
+Max(a.DiagnosisCode9POA) as DiagnosisCode9POA, 
+Max(a.DiagnosisCode10) as DiagnosisCode10, 
+Max(a.DiagnosisCode10POA) as DiagnosisCode10POA, 
+Max(a.DiagnosisCode11) as DiagnosisCode11, 
+Max(a.DiagnosisCode11POA) as DiagnosisCode11POA, 
+Max(a.DiagnosisCode12) as DiagnosisCode12, 
+Max(a.DiagnosisCode12POA) as DiagnosisCode12POA, 
+Max(a.DiagnosisCode13) as DiagnosisCode13, 
+Max(a.DiagnosisCode13POA) as DiagnosisCode13POA, 
+Max(a.DiagnosisCode14) as DiagnosisCode14, 
+Max(a.DiagnosisCode14POA) as DiagnosisCode14POA, 
+Max(a.DiagnosisCode15) as DiagnosisCode15, 
+Max(a.DiagnosisCode15POA) as DiagnosisCode15POA, 
+Max(a.DiagnosisCode16) as DiagnosisCode16, 
+Max(a.DiagnosisCode16POA) as DiagnosisCode16POA, 
+Max(a.DiagnosisCode17) as DiagnosisCode17, 
+Max(a.DiagnosisCode17POA) as DiagnosisCode17POA, 
+Max(a.DiagnosisCode18) as DiagnosisCode18, 
+Max(a.DiagnosisCode18POA) as DiagnosisCode18POA, 
+Max(a.DiagnosisCode19) as DiagnosisCode19, 
+Max(a.DiagnosisCode19POA) as DiagnosisCode19POA, 
+Max(a.DiagnosisCode20) as DiagnosisCode20, 
+Max(a.DiagnosisCode20POA) as DiagnosisCode20POA, 
+Max(a.DiagnosisCode21) as DiagnosisCode21, 
+Max(a.DiagnosisCode21POA) as DiagnosisCode21POA, 
+Max(a.DiagnosisCode22) as DiagnosisCode22, 
+Max(a.DiagnosisCode22POA) as DiagnosisCode22POA, 
+Max(a.DiagnosisCode23) as DiagnosisCode23, 
+Max(a.DiagnosisCode23POA) as DiagnosisCode23POA,  
+Max(a.DiagnosisCode24) as DiagnosisCode24, 
+Max(a.DiagnosisCode24POA) as DiagnosisCode24POA, 
+Max(a.DiagnosisCode25) as DiagnosisCode25, 
+Max(a.DiagnosisCode25POA) as DiagnosisCode25POA, 
+Max(a.ProcedureCodeSurgical) as ProcedureCodeSurgical, 
+Max(a.ProcedureCode1) as ProcedureCode1,
+Max(a.ProcedureCode2) as ProcedureCode2,
+Max(a.ProcedureCode3) as ProcedureCode3,
+Max(a.ProcedureCode4) as ProcedureCode4,
+Max(a.ProcedureCode5) as ProcedureCode5,
+Max(a.ProcedureCode6) as ProcedureCode6,
+Max(a.ProcedureCode7) as ProcedureCode7,
+Max(a.ProcedureCode8) as ProcedureCode8,
+Max(a.ProcedureCode9) as ProcedureCode9,
+Max(a.ProcedureCode10) as ProcedureCode10,
+Max(a.ProcedureCode11) as ProcedureCode11,
+Max(a.ProcedureCode12) as ProcedureCode12,
+Max(a.ProcedureCode13) as ProcedureCode13,
+Max(a.ProcedureCode14) as ProcedureCode14,
+Max(a.ProcedureCode15) as ProcedureCode15,
+Max(a.ProcedureCode16) as ProcedureCode16,
+Max(a.ProcedureCode17) as ProcedureCode17,
+Max(a.ProcedureCode18) as ProcedureCode18,
+Max(a.ProcedureCode19) as ProcedureCode19,
+Max(a.ProcedureCode20) as ProcedureCode20,
+Max(a.ProcedureCode21) as ProcedureCode21,
+Max(a.ProcedureCode22) as ProcedureCode22,
+Max(a.ProcedureCode23) as ProcedureCode23,
+Max(a.ProcedureCode24) as ProcedureCode24,
+Max(a.ProcedureCode25) as ProcedureCode25, 
+Max(a.ProfitabilityCode) as ProfitabilityCode, 
+Max(a.ServiceStartDate) as ServiceStartDate, 
+Max(a.PlaceOfService) as PlaceOfService, 
+Max(a.ClaimLineChargedAmount) as ClaimLineChargedAmount, 
+Max(a.ClaimLinePaidAmount) as ClaimLinePaidAmount, 
+Max(a.ProviderLocationCode) as ProviderLocationCode, 
+MAX(a.ProviderSpecialtyCode) as ProviderSpecialtyCode, 
+Max(a.InNetworkCode) as InNetworkCode,  
+Max(a.Par) as Par, 
+Max(a.PaidServiceUnitCount) as PaidServiceUnitCount, 
+Max(a.CopayAmount) as CopayAmount, 
+Max(a.CoinsuranceAmount) as CoinsuranceAmount, 
+Max(a.DeductibleAmount) as DeductibleAmount, 
+Max(a.ApprovedAmount) as ApprovedAmount,
+Max(a.MemberPenaltyAmount) as MemberPenaltyAmount, 
+Max(a.CoveredExpenseAmount) as CoveredExpenseAmount, 
+Max(a.ClaimEntryDate) as ClaimEntryDate,    
+Max(a.PrimaryCarrierResponsibilityCode) as PrimaryCarrierResponsibilityCode,
+Max(a.ProcesserUnitId) as ProcesserUnitId, 
+Max(a.PackageNr) as PackageNr, 
+Max(a.EmployerGroupDepartmentNr) as EmployerGroupDepartmentNr, 
+Max(a.COBSavingsAmount) as COBSavingsAmount, 
+MAX(a.BillingNPI) as BillingNPI, 
+IsSingleContract,
+Max(a.DischargeStatus) as DischargeStatus,
+Max(a.AdmitTypeCode) as AdmitTypeCode,
+Max(a.DiagnosisRelatedGroup) as DiagnosisRelatedGroup, 
+Max(a.ICDVersion) as ICDVersion,
+Max(a.TypeOfBillCode) as TypeOfBillCode,
+Max(a.DiagnosisRelatedGroupType) as DiagnosisRelatedGroupType,
+Max(a.DiagnosisRelatedGroupSeverity) as DiagnosisRelatedGroupSeverity,
+Max(a.RateCategory) as RateCategory,
+Max(a.RateSubcategory) as RateSubcategory,
+Max(a.RevenueCode) as RevenueCode,
+Max(a.BenefitPaymentTierCode) as BenefitPaymentTierCode
+into #temp1
+from #bridge1 a
+WHERE NOT EXISTS (Select claimnr, Claimlinenr From ClaimsData cd
+					where cd.Claimnr = a.claimnr
+					and cd.ClaimAdjustmentNr = a.ClaimAdjustmentNr
+					AND cd.ClaimLineNr = a.ClaimLineNr) 
+group by a.ClaimNr, a.claimlinenr, a.ClaimLineStatusCode, a.IsSingleContract, paiddate, PostDate;
+
+
+
+drop table if exists #ctemp1;   
+		--- gets rid of NULL values while keeping correct info on problem columns Moosh logic
+with CTE as 
+			(
+				SELECT *, 
+					RN = ROW_NUMBER() OVER (PARTITION BY claimnr, ClaimAdjustmentNr, claimlinenr ORDER BY  ClaimAdjustmentNr desc, claimlinenr desc)   --, MAX(id) as top_row
+					FROM #temp1
+			)
+		Select a.*
+		
+		INTO #ctemp1
+		from CTE a
+			INNER JOIN (
+				SELECT claimnr, claimadjustmentnr, Claimlinenr,  max(RN) as RN 
+				from CTE 
+				group by claimnr, claimadjustmentnr, Claimlinenr
+				) b
+			ON a.claimnr = b.claimnr AND a.claimadjustmentnr = b.claimadjustmentnr AND a.Claimlinenr = b.claimlinenr  AND a.RN = b.RN  ;
+
+
+alter table #ctemp1  --drop column RN 
+drop column RN; 
+
+
+drop table if exists ClaimsBridgeTrim;
+--Table creation for Bridge Trim
+select top 1 *,
+'7' as bridge,   -------------------------ADJUST ACCORDINGLY--------------------------------------------------------------------
+cast(NULL as bigint) HfClaimId,
+cast(NULL as bigint) HfClaimLineId,
+cast(NULL as int) ServiceStartDateYear,
+cast(NULL as varchar) MemberAddress1,
+cast(NULL as varchar) MemberAddress2,
+cast(NULL as varchar) MemberCity,
+cast(NULL as varchar) MemberState,
+cast(NULL as varchar) MemberZipCode,
+cast(NULL as varchar) MemberZipCode4,
+cast(NULL as varchar) MemberRelationshipDesc,
+cast(NULL as varchar) ProviderContractType,
+cast(NULL as varchar) BillingName,
+cast(NULL as varchar) ProviderSpecialtyDesc,
+cast(NULL as varchar) DenialReasonCode,
+cast(NULL as varchar) DenialReasonDescription,
+cast(NULL as int) HfOrganizationId,
+cast(NULL as int) HfProviderId,
+cast(NULL as int) HfProviderGroupId,
+cast(NULL as varchar) FileType,
+cast(NULL as numeric) ClaimChargedAmountCancellation,
+cast(NULL as numeric) ClaimPaidAmountCancellation,
+cast(NULL as numeric) BilledServiceUnitCountCancellation,
+cast(NULL as numeric) ClaimLineChargedAmountCancellation,
+cast(NULL as numeric) ClaimLinePaidAmountCancellation	,
+cast(NULL as numeric) PaidServiceUnitCountCancellation,
+cast(NULL as numeric) CopayAmountCancellation,
+cast(NULL as numeric) CoinsuranceAmountCancellation,
+cast(NULL as numeric) DeductibleAmountCancellation,
+cast(NULL as numeric) ApprovedAmountCancellation,
+cast(NULL as numeric) MemberPenaltyAmountCancellation,
+cast(NULL as numeric) CoveredExpenseAmountCancellation,
+cast(NULL as numeric) COBSavingsAmountCancellation,
+cast(NULL as varchar) HCPCS,
+cast(NULL as varchar) DiagnosisRelatedGroupDesc,
+cast(NULL as varchar) DiagnosisCodeAdmitDesc,
+cast(NULL as varchar) DiagnosisCodePrincipleDesc,
+cast(NULL as varchar) DiagnosisCode1Desc,
+cast(NULL as varchar) DiagnosisCode2Desc,
+cast(NULL as varchar) DiagnosisCode3Desc,
+cast(NULL as varchar) DiagnosisCode4Desc,
+cast(NULL as varchar) DiagnosisCode5Desc,
+cast(NULL as varchar) DiagnosisCode6Desc,
+cast(NULL as varchar) DiagnosisCode7Desc,
+cast(NULL as varchar) DiagnosisCode8Desc,
+cast(NULL as varchar) DiagnosisCode9Desc,
+cast(NULL as varchar) DiagnosisCode10Desc,
+cast(NULL as varchar) DiagnosisCode11Desc,
+cast(NULL as varchar) DiagnosisCode12Desc,
+cast(NULL as varchar) DiagnosisCode13Desc,
+cast(NULL as varchar) DiagnosisCode14Desc,
+cast(NULL as varchar) DiagnosisCode15Desc,
+cast(NULL as varchar) DiagnosisCode16Desc,
+cast(NULL as varchar) DiagnosisCode17Desc,
+cast(NULL as varchar) DiagnosisCode18Desc,
+cast(NULL as varchar) DiagnosisCode19Desc,
+cast(NULL as varchar) DiagnosisCode20Desc,
+cast(NULL as varchar) DiagnosisCode21Desc,
+cast(NULL as varchar) DiagnosisCode22Desc,
+cast(NULL as varchar) DiagnosisCode23Desc,
+cast(NULL as varchar) DiagnosisCode24Desc,
+cast(NULL as varchar) DiagnosisCode25Desc,
+cast(NULL as varchar) ProcedureCodeSurgicalDesc,
+cast(NULL as varchar) ProcedureCode1Desc,
+cast(NULL as varchar) ProcedureCode2Desc,
+cast(NULL as varchar) ProcedureCode3Desc,
+cast(NULL as varchar) ProcedureCode4Desc,
+cast(NULL as varchar) ProcedureCode5Desc,
+cast(NULL as varchar) ProcedureCode6Desc,
+cast(NULL as varchar) ProcedureCode7Desc,
+cast(NULL as varchar) ProcedureCode8Desc,
+cast(NULL as varchar) ProcedureCode9Desc,
+cast(NULL as varchar) ProcedureCode10Desc,
+cast(NULL as varchar) ProcedureCode11Desc,
+cast(NULL as varchar) ProcedureCode12Desc,
+cast(NULL as varchar) ProcedureCode13Desc,
+cast(NULL as varchar) ProcedureCode14Desc,
+cast(NULL as varchar) ProcedureCode15Desc,
+cast(NULL as varchar) ProcedureCode16Desc,
+cast(NULL as varchar) ProcedureCode17Desc,
+cast(NULL as varchar) ProcedureCode18Desc,
+cast(NULL as varchar) ProcedureCode19Desc,
+cast(NULL as varchar) ProcedureCode20Desc,
+cast(NULL as varchar) ProcedureCode21Desc,
+cast(NULL as varchar) ProcedureCode22Desc,
+cast(NULL as varchar) ProcedureCode23Desc,
+cast(NULL as varchar) ProcedureCode24Desc,
+cast(NULL as varchar) ProcedureCode25Desc,
+cast(NULL as varchar) PlanName,
+cast(NULL as varchar) vendor,
+cast(NULL as bit) IsER,
+cast(NULL as bit) IsOutpatient,
+cast(NULL as bit) IsInpatient,
+cast(NULL as bit) IsMaternity,
+cast(NULL as bit) IsUrgentCare,
+cast(NULL as bit) IsAmbulatorySurgicalCenter,
+cast(NULL as varchar) MemberFirstName,
+cast(NULL as varchar) MemberLastName,
+cast(NULL as varchar) MemberMiddleName,
+cast(NULL as date) PaidDateCancellation,
+cast(NULL as varchar) PatientFirstName,
+cast(NULL as varchar) PatientLastName,
+cast(NULL as varchar) PatientMiddleName,
+cast(NULL as int) HfSpecialtyId
+INTO ClaimsBridgeTrim
+from #ctemp1;
+
+
+-----Insert data into Bridge Trim
+INSERT INTO ClaimsBridgeTrim
+select * ,
+'7' as bridge,   -------------------------ADJUST ACCORDINGLY--------------------------------------------------------------------
+cast(NULL as bigint) HfClaimId,
+cast(NULL as bigint) HfClaimLineId,
+cast(Null as varchar) FileType,
+cast(NULL as int) ServiceStartDateYear,
+cast(NULL as varchar) MemberAddress1,
+cast(NULL as varchar) MemberAddress2,
+cast(NULL as varchar) MemberCity,
+cast(NULL as varchar) MemberState,
+cast(NULL as varchar) MemberZipCode,
+cast(NULL as varchar) MemberZipCode4,
+cast(NULL as varchar) MemberRelationshipDesc,
+cast(NULL as varchar) ProviderContractType,
+cast(NULL as varchar) BillingName,
+cast(NULL as varchar) ProviderSpecialtyDesc,
+cast(NULL as varchar) DenialReasonCode,
+cast(NULL as varchar) DenialReasonDescription,
+cast(NULL as int) HfOrganizationId,
+cast(NULL as int) HfProviderId,
+cast(NULL as int) HfProviderGroupId,
+cast(NULL as numeric) ClaimChargedAmountCancellation,
+cast(NULL as numeric) ClaimPaidAmountCancellation,
+cast(NULL as numeric) BilledServiceUnitCountCancellation,
+cast(NULL as numeric) ClaimLineChargedAmountCancellation,
+cast(NULL as numeric) ClaimLinePaidAmountCancellation	,
+cast(NULL as numeric) PaidServiceUnitCountCancellation,
+cast(NULL as numeric) CopayAmountCancellation,
+cast(NULL as numeric) CoinsuranceAmountCancellation,
+cast(NULL as numeric) DeductibleAmountCancellation,
+cast(NULL as numeric) ApprovedAmountCancellation,
+cast(NULL as numeric) MemberPenaltyAmountCancellation,
+cast(NULL as numeric) CoveredExpenseAmountCancellation,
+cast(NULL as numeric) COBSavingsAmountCancellation,
+cast(NULL as varchar) HCPCS,
+cast(NULL as varchar) DiagnosisRelatedGroupDesc,
+cast(NULL as varchar) DiagnosisCodeAdmitDesc,
+cast(NULL as varchar) DiagnosisCodePrincipleDesc,
+cast(NULL as varchar) DiagnosisCode1Desc,
+cast(NULL as varchar) DiagnosisCode2Desc,
+cast(NULL as varchar) DiagnosisCode3Desc,
+cast(NULL as varchar) DiagnosisCode4Desc,
+cast(NULL as varchar) DiagnosisCode5Desc,
+cast(NULL as varchar) DiagnosisCode6Desc,
+cast(NULL as varchar) DiagnosisCode7Desc,
+cast(NULL as varchar) DiagnosisCode8Desc,
+cast(NULL as varchar) DiagnosisCode9Desc,
+cast(NULL as varchar) DiagnosisCode10Desc,
+cast(NULL as varchar) DiagnosisCode11Desc,
+cast(NULL as varchar) DiagnosisCode12Desc,
+cast(NULL as varchar) DiagnosisCode13Desc,
+cast(NULL as varchar) DiagnosisCode14Desc,
+cast(NULL as varchar) DiagnosisCode15Desc,
+cast(NULL as varchar) DiagnosisCode16Desc,
+cast(NULL as varchar) DiagnosisCode17Desc,
+cast(NULL as varchar) DiagnosisCode18Desc,
+cast(NULL as varchar) DiagnosisCode19Desc,
+cast(NULL as varchar) DiagnosisCode20Desc,
+cast(NULL as varchar) DiagnosisCode21Desc,
+cast(NULL as varchar) DiagnosisCode22Desc,
+cast(NULL as varchar) DiagnosisCode23Desc,
+cast(NULL as varchar) DiagnosisCode24Desc,
+cast(NULL as varchar) DiagnosisCode25Desc,
+cast(NULL as varchar) ProcedureCodeSurgicalDesc,
+cast(NULL as varchar) ProcedureCode1Desc,
+cast(NULL as varchar) ProcedureCode2Desc,
+cast(NULL as varchar) ProcedureCode3Desc,
+cast(NULL as varchar) ProcedureCode4Desc,
+cast(NULL as varchar) ProcedureCode5Desc,
+cast(NULL as varchar) ProcedureCode6Desc,
+cast(NULL as varchar) ProcedureCode7Desc,
+cast(NULL as varchar) ProcedureCode8Desc,
+cast(NULL as varchar) ProcedureCode9Desc,
+cast(NULL as varchar) ProcedureCode10Desc,
+cast(NULL as varchar) ProcedureCode11Desc,
+cast(NULL as varchar) ProcedureCode12Desc,
+cast(NULL as varchar) ProcedureCode13Desc,
+cast(NULL as varchar) ProcedureCode14Desc,
+cast(NULL as varchar) ProcedureCode15Desc,
+cast(NULL as varchar) ProcedureCode16Desc,
+cast(NULL as varchar) ProcedureCode17Desc,
+cast(NULL as varchar) ProcedureCode18Desc,
+cast(NULL as varchar) ProcedureCode19Desc,
+cast(NULL as varchar) ProcedureCode20Desc,
+cast(NULL as varchar) ProcedureCode21Desc,
+cast(NULL as varchar) ProcedureCode22Desc,
+cast(NULL as varchar) ProcedureCode23Desc,
+cast(NULL as varchar) ProcedureCode24Desc,
+cast(NULL as varchar) ProcedureCode25Desc,
+cast(NULL as varchar) PlanName,
+cast(NULL as varchar) vendor,
+cast(NULL as bit) IsER,
+cast(NULL as bit) IsOutpatient,
+cast(NULL as bit) IsInpatient,
+cast(NULL as bit) IsMaternity,
+cast(NULL as bit) IsUrgentCare,
+cast(NULL as bit) IsAmbulatorySurgicalCenter,
+cast(NULL as varchar) MemberFirstName,
+cast(NULL as varchar) MemberLastName,
+cast(NULL as varchar) MemberMiddleName,
+cast(NULL as date) PaidDateCancellation,
+cast(NULL as varchar) PatientFirstName,
+cast(NULL as varchar) PatientLastName,
+cast(NULL as varchar) PatientMiddleName,
+cast(NULL as int) HfSpecialtyId
+from #ctemp1;
+
+-----INSERT into ClaimsData
+
+INSERT INTO ClaimsData
+ (HfClaimId
+           ,HfClaimLineId
+           ,ClaimNr
+           ,ClaimAdjustmentNr
+           ,ClaimLineNr
+           ,PaidDate
+           ,ServiceStartDateYear
+           ,ServiceStartDate
+           ,ServiceEndDate
+           ,ClaimEntryDate
+           ,AdmitDate
+           ,DischargeDate
+           ,PERSON_ID
+           ,MemberName
+           ,MemberSSN
+           ,MemberAddress1
+           ,MemberAddress2
+           ,MemberCity
+           ,MemberState
+           ,MemberZipCode
+           ,MemberZipCode4
+           ,HealthCardId
+           ,MemberRelationshipCode
+           ,MemberRelationshipDesc
+           ,PatientName
+           ,PatientSSN
+           ,PatientGender
+           ,PatientDOB
+           ,DependentNr
+           ,Deceased
+           ,InvestigationClaimCode
+           ,EPIN
+           ,CountyCode
+           ,PrimaryCarrierResponsibilityCode
+           ,ProcesserUnitId
+           ,EmployerGroupDepartmentNr
+           ,DischargeStatus
+           ,AdmitTypeCode
+           ,ICDVersion
+           ,TypeOfBillCode
+           ,BenefitPaymentTierCode
+           ,ClaimLineStatusCode
+           ,ProviderLocationCode
+           ,ProviderContractType
+           ,ServiceRenderingType
+           ,RenderingNPI
+           ,RenderingName
+           ,RenderingAddress1
+           ,RenderingAddress2
+           ,RenderingCity
+           ,RenderingState
+           ,RenderingZipCode
+           ,RenderingZipCode4
+           ,BillingNPI
+           ,BillingName
+           ,BillingAddress1
+           ,BillingAddress2
+           ,BillingCity
+           ,BillingState
+           ,BillingZipCode
+           ,BillingZipCode4
+           ,BillingTaxId
+           ,AuthorizationNr
+           ,ProfitabilityCode
+           ,PlaceOfService
+           ,ProviderSpecialtyCode
+           ,ProviderSpecialtyDesc
+           ,InNetworkCode
+           ,Par
+           ,DenialReasonCode
+           ,DenialReasonDescription
+           ,PackageNr
+           ,HfOrganizationId
+           ,HfProviderId
+           ,HfProviderGroupId
+           ,RateCategory
+           ,RateSubcategory
+           ,RevenueCode
+           ,ClaimChargedAmount
+           ,ClaimChargedAmountCancellation
+           ,ClaimPaidAmount
+           ,ClaimPaidAmountCancellation
+           ,BilledServiceUnitCount
+           ,BilledServiceUnitCountCancellation
+           ,ClaimLineChargedAmount
+           ,ClaimLineChargedAmountCancellation
+           ,ClaimLinePaidAmount
+           ,ClaimLinePaidAmountCancellation
+           ,PaidServiceUnitCount
+           ,PaidServiceUnitCountCancellation
+           ,CopayAmount
+           ,CopayAmountCancellation
+           ,CoinsuranceAmount
+           ,CoinsuranceAmountCancellation
+           ,DeductibleAmount
+           ,DeductibleAmountCancellation
+           ,ApprovedAmount
+           ,ApprovedAmountCancellation
+           ,MemberPenaltyAmount
+           ,MemberPenaltyAmountCancellation
+           ,CoveredExpenseAmount
+           ,CoveredExpenseAmountCancellation
+           ,COBSavingsAmount
+           ,COBSavingsAmountCancellation
+           ,HCPCS
+           ,HCPCS_Modifier1
+           ,HCPCS_Modifier2
+           ,HCPCS_Modifier3
+           ,HCPCS_Modifier4
+           ,DiagnosisRelatedGroup
+           ,DiagnosisRelatedGroupDesc
+           ,DiagnosisRelatedGroupType
+           ,DiagnosisCodeAdmit
+           ,DiagnosisCodeAdmitDesc
+           ,DiagnosisCodeAdmitPOA
+           ,DiagnosisCodePrinciple
+           ,DiagnosisCodePrincipleDesc
+           ,DiagnosisCodePrinciplePOA
+           ,DiagnosisCode1
+           ,DiagnosisCode1Desc
+           ,DiagnosisCode1POA
+           ,DiagnosisCode2
+           ,DiagnosisCode2Desc
+           ,DiagnosisCode2POA
+           ,DiagnosisCode3
+           ,DiagnosisCode3Desc
+           ,DiagnosisCode3POA
+           ,DiagnosisCode4
+           ,DiagnosisCode4Desc
+           ,DiagnosisCode4POA
+           ,DiagnosisCode5
+           ,DiagnosisCode5Desc
+           ,DiagnosisCode5POA
+           ,DiagnosisCode6
+           ,DiagnosisCode6Desc
+           ,DiagnosisCode6POA
+           ,DiagnosisCode7
+           ,DiagnosisCode7Desc
+           ,DiagnosisCode7POA
+           ,DiagnosisCode8
+           ,DiagnosisCode8Desc
+           ,DiagnosisCode8POA
+           ,DiagnosisCode9
+           ,DiagnosisCode9Desc
+           ,DiagnosisCode9POA
+           ,DiagnosisCode10
+           ,DiagnosisCode10Desc
+           ,DiagnosisCode10POA
+           ,DiagnosisCode11
+           ,DiagnosisCode11Desc
+           ,DiagnosisCode11POA
+           ,DiagnosisCode12
+           ,DiagnosisCode12Desc
+           ,DiagnosisCode12POA
+           ,DiagnosisCode13
+           ,DiagnosisCode13Desc
+           ,DiagnosisCode13POA
+           ,DiagnosisCode14
+           ,DiagnosisCode14Desc
+           ,DiagnosisCode14POA
+           ,DiagnosisCode15
+           ,DiagnosisCode15Desc
+           ,DiagnosisCode15POA
+           ,DiagnosisCode16
+           ,DiagnosisCode16Desc
+           ,DiagnosisCode16POA
+           ,DiagnosisCode17
+           ,DiagnosisCode17Desc
+           ,DiagnosisCode17POA
+           ,DiagnosisCode18
+           ,DiagnosisCode18Desc
+           ,DiagnosisCode18POA
+           ,DiagnosisCode19
+           ,DiagnosisCode19Desc
+           ,DiagnosisCode19POA
+           ,DiagnosisCode20
+           ,DiagnosisCode20Desc
+           ,DiagnosisCode20POA
+           ,DiagnosisCode21
+           ,DiagnosisCode21Desc
+           ,DiagnosisCode21POA
+           ,DiagnosisCode22
+           ,DiagnosisCode22Desc
+           ,DiagnosisCode22POA
+           ,DiagnosisCode23
+           ,DiagnosisCode23Desc
+           ,DiagnosisCode23POA
+           ,DiagnosisCode24
+           ,DiagnosisCode24Desc
+           ,DiagnosisCode24POA
+           ,DiagnosisCode25
+           ,DiagnosisCode25Desc
+           ,DiagnosisCode25POA
+           ,ProcedureCodeSurgical
+           ,ProcedureCodeSurgicalDesc
+           ,ProcedureCode1
+           ,ProcedureCode1Desc
+           ,ProcedureCode2
+           ,ProcedureCode2Desc
+           ,ProcedureCode3
+           ,ProcedureCode3Desc
+           ,ProcedureCode4
+           ,ProcedureCode4Desc
+           ,ProcedureCode5
+           ,ProcedureCode5Desc
+           ,ProcedureCode6
+           ,ProcedureCode6Desc
+           ,ProcedureCode7
+           ,ProcedureCode7Desc
+           ,ProcedureCode8
+           ,ProcedureCode8Desc
+           ,ProcedureCode9
+           ,ProcedureCode9Desc
+           ,ProcedureCode10
+           ,ProcedureCode10Desc
+           ,ProcedureCode11
+           ,ProcedureCode11Desc
+           ,ProcedureCode12
+           ,ProcedureCode12Desc
+           ,ProcedureCode13
+           ,ProcedureCode13Desc
+           ,ProcedureCode14
+           ,ProcedureCode14Desc
+           ,ProcedureCode15
+           ,ProcedureCode15Desc
+           ,ProcedureCode16
+           ,ProcedureCode16Desc
+           ,ProcedureCode17
+           ,ProcedureCode17Desc
+           ,ProcedureCode18
+           ,ProcedureCode18Desc
+           ,ProcedureCode19
+           ,ProcedureCode19Desc
+           ,ProcedureCode20
+           ,ProcedureCode20Desc
+           ,ProcedureCode21
+           ,ProcedureCode21Desc
+           ,ProcedureCode22
+           ,ProcedureCode22Desc
+           ,ProcedureCode23
+           ,ProcedureCode23Desc
+           ,ProcedureCode24
+           ,ProcedureCode24Desc
+           ,ProcedureCode25
+           ,ProcedureCode25Desc
+           ,DiagnosisRelatedGroupSeverity
+           ,GroupNr
+           ,SubgroupNr
+           ,PlanName
+           ,vendor
+           ,IsER
+           ,IsOutpatient
+           ,IsInpatient
+           ,IsMaternity
+           ,IsUrgentCare
+           ,IsAmbulatorySurgicalCenter
+           ,MemberFirstName
+           ,MemberLastName
+           ,MemberMiddleName
+           ,PaidDateCancellation
+           ,PostDate
+           ,FileType
+           ,IsSingleContract
+           ,PatientFirstName
+           ,PatientLastName
+           ,PatientMiddleName
+           ,HfSpecialtyId
+           ,bridge) 
+	select HfClaimId
+           ,HfClaimLineId
+           ,ClaimNr
+           ,ClaimAdjustmentNr
+           ,ClaimLineNr
+           ,PaidDate
+           ,ServiceStartDateYear
+           ,ServiceStartDate
+           ,ServiceEndDate
+           ,ClaimEntryDate
+           ,AdmitDate
+           ,DischargeDate
+           ,PERSON_ID
+           ,MemberName
+           ,MemberSSN
+           ,MemberAddress1
+           ,MemberAddress2
+           ,MemberCity
+           ,MemberState
+           ,MemberZipCode
+           ,MemberZipCode4
+           ,HealthCardId
+           ,MemberRelationshipCode
+           ,MemberRelationshipDesc
+           ,PatientName
+           ,PatientSSN
+           ,PatientGender
+           ,PatientDOB
+           ,DependentNr
+           ,Deceased
+           ,InvestigationClaimCode
+           ,EPIN
+           ,CountyCode
+           ,PrimaryCarrierResponsibilityCode
+           ,ProcesserUnitId
+           ,EmployerGroupDepartmentNr
+           ,DischargeStatus
+           ,AdmitTypeCode
+           ,ICDVersion
+           ,TypeOfBillCode
+           ,BenefitPaymentTierCode
+           ,ClaimLineStatusCode
+           ,ProviderLocationCode
+           ,ProviderContractType
+           ,ServiceRenderingType
+           ,RenderingNPI
+           ,RenderingName
+           ,RenderingAddress1
+           ,RenderingAddress2
+           ,RenderingCity
+           ,RenderingState
+           ,RenderingZipCode
+           ,RenderingZipCode4
+           ,BillingNPI
+           ,BillingName
+           ,BillingAddress1
+           ,BillingAddress2
+           ,BillingCity
+           ,BillingState
+           ,BillingZipCode
+           ,BillingZipCode4
+           ,BillingTaxId
+           ,AuthorizationNr
+           ,ProfitabilityCode
+           ,PlaceOfService
+           ,ProviderSpecialtyCode
+           ,ProviderSpecialtyDesc
+           ,InNetworkCode
+           ,Par
+           ,DenialReasonCode
+           ,DenialReasonDescription
+           ,PackageNr
+           ,HfOrganizationId
+           ,HfProviderId
+           ,HfProviderGroupId
+           ,RateCategory
+           ,RateSubcategory
+           ,RevenueCode
+           ,ClaimChargedAmount
+           ,ClaimChargedAmountCancellation
+           ,ClaimPaidAmount
+           ,ClaimPaidAmountCancellation
+           ,BilledServiceUnitCount
+           ,BilledServiceUnitCountCancellation
+           ,ClaimLineChargedAmount
+           ,ClaimLineChargedAmountCancellation
+           ,ClaimLinePaidAmount
+           ,ClaimLinePaidAmountCancellation
+           ,PaidServiceUnitCount
+           ,PaidServiceUnitCountCancellation
+           ,CopayAmount
+           ,CopayAmountCancellation
+           ,CoinsuranceAmount
+           ,CoinsuranceAmountCancellation
+           ,DeductibleAmount
+           ,DeductibleAmountCancellation
+           ,ApprovedAmount
+           ,ApprovedAmountCancellation
+           ,MemberPenaltyAmount
+           ,MemberPenaltyAmountCancellation
+           ,CoveredExpenseAmount
+           ,CoveredExpenseAmountCancellation
+           ,COBSavingsAmount
+           ,COBSavingsAmountCancellation
+           ,HCPCS
+           ,HCPCS_Modifier1
+           ,HCPCS_Modifier2
+           ,HCPCS_Modifier3
+           ,HCPCS_Modifier4
+           ,DiagnosisRelatedGroup
+           ,DiagnosisRelatedGroupDesc
+           ,DiagnosisRelatedGroupType
+           ,DiagnosisCodeAdmit
+           ,DiagnosisCodeAdmitDesc
+           ,DiagnosisCodeAdmitPOA
+           ,DiagnosisCodePrinciple
+           ,DiagnosisCodePrincipleDesc
+           ,DiagnosisCodePrinciplePOA
+           ,DiagnosisCode1
+           ,DiagnosisCode1Desc
+           ,DiagnosisCode1POA
+           ,DiagnosisCode2
+           ,DiagnosisCode2Desc
+           ,DiagnosisCode2POA
+           ,DiagnosisCode3
+           ,DiagnosisCode3Desc
+           ,DiagnosisCode3POA
+           ,DiagnosisCode4
+           ,DiagnosisCode4Desc
+           ,DiagnosisCode4POA
+           ,DiagnosisCode5
+           ,DiagnosisCode5Desc
+           ,DiagnosisCode5POA
+           ,DiagnosisCode6
+           ,DiagnosisCode6Desc
+           ,DiagnosisCode6POA
+           ,DiagnosisCode7
+           ,DiagnosisCode7Desc
+           ,DiagnosisCode7POA
+           ,DiagnosisCode8
+           ,DiagnosisCode8Desc
+           ,DiagnosisCode8POA
+           ,DiagnosisCode9
+           ,DiagnosisCode9Desc
+           ,DiagnosisCode9POA
+           ,DiagnosisCode10
+           ,DiagnosisCode10Desc
+           ,DiagnosisCode10POA
+           ,DiagnosisCode11
+           ,DiagnosisCode11Desc
+           ,DiagnosisCode11POA
+           ,DiagnosisCode12
+           ,DiagnosisCode12Desc
+           ,DiagnosisCode12POA
+           ,DiagnosisCode13
+           ,DiagnosisCode13Desc
+           ,DiagnosisCode13POA
+           ,DiagnosisCode14
+           ,DiagnosisCode14Desc
+           ,DiagnosisCode14POA
+           ,DiagnosisCode15
+           ,DiagnosisCode15Desc
+           ,DiagnosisCode15POA
+           ,DiagnosisCode16
+           ,DiagnosisCode16Desc
+           ,DiagnosisCode16POA
+           ,DiagnosisCode17
+           ,DiagnosisCode17Desc
+           ,DiagnosisCode17POA
+           ,DiagnosisCode18
+           ,DiagnosisCode18Desc
+           ,DiagnosisCode18POA
+           ,DiagnosisCode19
+           ,DiagnosisCode19Desc
+           ,DiagnosisCode19POA
+           ,DiagnosisCode20
+           ,DiagnosisCode20Desc
+           ,DiagnosisCode20POA
+           ,DiagnosisCode21
+           ,DiagnosisCode21Desc
+           ,DiagnosisCode21POA
+           ,DiagnosisCode22
+           ,DiagnosisCode22Desc
+           ,DiagnosisCode22POA
+           ,DiagnosisCode23
+           ,DiagnosisCode23Desc
+           ,DiagnosisCode23POA
+           ,DiagnosisCode24
+           ,DiagnosisCode24Desc
+           ,DiagnosisCode24POA
+           ,DiagnosisCode25
+           ,DiagnosisCode25Desc
+           ,DiagnosisCode25POA
+           ,ProcedureCodeSurgical
+           ,ProcedureCodeSurgicalDesc
+           ,ProcedureCode1
+           ,ProcedureCode1Desc
+           ,ProcedureCode2
+           ,ProcedureCode2Desc
+           ,ProcedureCode3
+           ,ProcedureCode3Desc
+           ,ProcedureCode4
+           ,ProcedureCode4Desc
+           ,ProcedureCode5
+           ,ProcedureCode5Desc
+           ,ProcedureCode6
+           ,ProcedureCode6Desc
+           ,ProcedureCode7
+           ,ProcedureCode7Desc
+           ,ProcedureCode8
+           ,ProcedureCode8Desc
+           ,ProcedureCode9
+           ,ProcedureCode9Desc
+           ,ProcedureCode10
+           ,ProcedureCode10Desc
+           ,ProcedureCode11
+           ,ProcedureCode11Desc
+           ,ProcedureCode12
+           ,ProcedureCode12Desc
+           ,ProcedureCode13
+           ,ProcedureCode13Desc
+           ,ProcedureCode14
+           ,ProcedureCode14Desc
+           ,ProcedureCode15
+           ,ProcedureCode15Desc
+           ,ProcedureCode16
+           ,ProcedureCode16Desc
+           ,ProcedureCode17
+           ,ProcedureCode17Desc
+           ,ProcedureCode18
+           ,ProcedureCode18Desc
+           ,ProcedureCode19
+           ,ProcedureCode19Desc
+           ,ProcedureCode20
+           ,ProcedureCode20Desc
+           ,ProcedureCode21
+           ,ProcedureCode21Desc
+           ,ProcedureCode22
+           ,ProcedureCode22Desc
+           ,ProcedureCode23
+           ,ProcedureCode23Desc
+           ,ProcedureCode24
+           ,ProcedureCode24Desc
+           ,ProcedureCode25
+           ,ProcedureCode25Desc
+           ,DiagnosisRelatedGroupSeverity
+           ,GroupNr
+           ,SubgroupNr
+           ,PlanName
+           ,vendor
+           ,IsER
+           ,IsOutpatient
+           ,IsInpatient
+           ,IsMaternity
+           ,IsUrgentCare
+           ,IsAmbulatorySurgicalCenter
+           ,MemberFirstName
+           ,MemberLastName
+           ,MemberMiddleName
+           ,PaidDateCancellation
+           ,PostDate
+           ,FileType
+           ,IsSingleContract
+           ,PatientFirstName
+           ,PatientLastName
+           ,PatientMiddleName
+           ,HfSpecialtyId
+           ,bridge 
+ 	from ClaimsBridgeTrim
+
+
+------------#HFCLAIMBRIDGE Table creation for all HfClaimIds that are not in ClaimsData----------------------------------------
+
+Drop table if exists #HFclaimbridge;
+
+select distinct c.claimnr , c.HfClaimId
+INTO #HFclaimbridge
+from claims c
+left join ClaimsData cd
+on c.claimnr=cd.ClaimNr
+where cd.HfClaimId IS NULL
+and cd.ClaimNr IS NOT NULL
+
+
+----------ClaimsData Update Code
+Update  ClaimsData
+Set ClaimsData.HfClaimId = cb.HfClaimId
+From ClaimsData b
+inner join #HFclaimbridge cb
+ON b.claimnr = cb.claimnr
+where b.HfClaimId IS NULL
+
+
+-------------------Update Missing HfClaimIds from ClaimsData with newly created HfClaimIds --------------------------------
+
+ ----------------pull only claimnr and blank hfclaimid
+ drop table if exists #hfbridge;
+
+ select distinct Claimnr, HfClaimId
+ into #hfBridge
+ from ClaimsData
+ where HfClaimId IS NULL;    
+
+-----------------declare and find most recent number 
+declare @hfid bigint;
+set @hfid = (select max(HfClaimId) from ClaimsData);  
+
+---update temp table with new HfClaimIds for every claimNr
+update hfb
+set @hfid = HfClaimId = @hfid + 1
+from #Hfbridge hfb
+inner join #Hfbridge cd
+ON cd.ClaimNr = hfb.ClaimNr
+where hfb.HfClaimId IS NULL;
+
+
+-----Add newly minted HfClaimIds back to data
+update b 
+set b.HfClaimId = hfb.HfClaimId
+from ClaimsData b
+Inner join #Hfbridge hfb
+on hfb.ClaimNr = b.ClaimNr
+where b.HfClaimId IS NULL;
+
+-------------------------------------------------- sequence update -----------------------------------------------------
+
+----see all sequences
+--select * from 
+--sys.sequences    
+
+-------Find highest HfClaimId 
+--select max(HfClaimId) from ClaimsData   
+
+----alter sequence to start with highest HfClaimId
+--set @hfid = (select max(HfClaimId) from ClaimsData) + 1;
+--alter sequence SqClaims restart with @hfid        ---whatever number is max(HfClaimid) 
+
+DECLARE @hfidmax INT;
+DECLARE @sql NVARCHAR(MAX);
+
+-- Calculate the new starting value
+SET @hfidmax = (SELECT MAX(HfClaimId) FROM ClaimsData) + 1;  ---whatever number is max(HfClaimid)
+
+-- Generate the dynamic SQL statement
+SET @sql = N'ALTER SEQUENCE SqClaims RESTART WITH ' + CAST(@hfidmax AS NVARCHAR(255));
+
+-- Execute the dynamic SQL
+EXEC sp_executesql @sql;
+ 
+
+---------------------This code is for the removal of outliers that the Bridge code MIGHT miss ---------------------------------
+------------------------lower claimadjustmentNrs etc. 
+
+Drop table if exists #claimtemp;
+---Id max claimadjustmentnr with hfclaimid
+select HfClaimid, max(claimadjustmentNr) as mxadjnr 
+into #claimtemp
+from ClaimsData
+group by HfClaimId
+
+
+Drop table if exists #temptodelete;
+---id those in claimsdata that need to be removed
+SELECT distinct  cd.hfclaimid, ClaimAdjustmentNr
+into #temptodelete
+FROM ClaimsData cd
+  inner  JOIN #claimtemp ct 
+	ON  cd.HfClaimId = ct.HfClaimId
+WHERE cd.Claimadjustmentnr < ct.mxadjnr ;
+
+
+--select top 100 * from #temptodelete
+--order by HfClaimId, ClaimAdjustmentNr asc
+
+---Remove those needed to be removed from claimsdata
+
+Delete from ClaimsData 
+from ClaimsData cd
+join #temptodelete de
+	on cd.HfClaimId = de.HfClaimId
+	and cd.ClaimAdjustmentNr = de.ClaimAdjustmentNr
+	
+
+drop table #claimtemp
+drop table #temptodelete
+
+
+------------------------------------ HCPCS -----------------------------------------
+
+--select cc.hcpcs, m.hcpcs, m.claimnr, m.claimadjustmentnr, m.ClaimLineNr from claimsdata m with (nolock)
+--left join ClaimsClean cc with (nolock)
+--on m.claimnr = cc.ClaimNr and m.claimadjustmentnr = cc.claimadjustmentnr and m.ClaimLineNr = cc.ClaimLineNr
+--where m.bridge = 7   -------------------------ADJUST ACCORDINGLY--------------------------------------------------------------------
+--and m.hcpcs is null
+
+
+
+drop table if exists #Tempbridge2;
+---pull high adjustment number for all claims not in Claims Data
+select  ClaimNr, max(ClaimAdjustmentNr) as ClaimAdjustmentNr, ClaimLineNr
+Into #Tempbridge2
+from Claimsdata cd  with (nolock)
+where bridge = 7   -------------------------ADJUST ACCORDINGLY--------------------------------------------------------------------
+group by cd.claimnr, cd.ClaimLineNr 
+
+      
+--create bridge of full data from missing high adjNr
+DROP TABLE IF EXISTS #bridge2
+
+Select distinct m.claimnr, m.claimadjustmentnr, m.ClaimLineNr, cc.hcpcs 
+  INTO #bridge2
+from #Tempbridge2 m
+  left join ClaimsClean cc 
+  on m.claimnr = cc.ClaimNr and m.claimadjustmentnr = cc.claimadjustmentnr and m.ClaimLineNr = cc.ClaimLineNr
+   order by m.claimnr, m.claimadjustmentnr, m.ClaimLineNr;
+
+
+UPDATE m
+SET m.hcpcs = cc.hcpcs
+FROM ClaimsData m
+INNER JOIN #bridge2 cc 
+		ON m.claimnr = cc.ClaimNr 
+        AND m.claimadjustmentnr = cc.claimadjustmentnr 
+        AND m.ClaimLineNr = cc.ClaimLineNr
+WHERE m.hcpcs IS NULL
+and m.bridge = 7; -------------------------ADJUST ACCORDINGLY--------------------------------------------------------------------
+
+
+-------------------------------------------- IF FLAGS --------------------------------------------------------------------------
+	
+drop table if exists #ICDCodes;
+drop table if exists  #tmpBridgeFlags;
+drop table if exists #tmpBridgeFlagsDistinct;
+
+select distinct code_id as ICDCode
+into #ICDCodes
+from DeliveryCodes
+where code_type = 'ICD';
+
+select hfclaimid,
+'PLAN' as vendor,
+
+			max(		-- Use max() and "partition by" to get results on the claim level.
+				case
+					when HCPCS in ('S9083','S9088') then 1					
+					when PlaceOfService = '20' and HfSpecialtyId <> 66 then 1				-- ProviderSpecialtyCode not in ('080', '0J2'), ProviderSpecialtyDesc: 'LAB'
+					when PlaceOfService = '11' and HfSpecialtyId in (28, 38, 186) then 1	-- ProviderSpecialtyCode in ('048', '049', '00B', '0H5'), ProviderSpecialtyDesc: 'EMERGENCY MEDICINE', 'URGENT CARE', 'URGENT CARE - STAFF'
+					else 0
+				end
+				) over (partition by HfClaimId) as IsUrgentCare,
+			max(		-- Use max() and "partition by" to get results on the claim level. If any claim-line column caused the condition to evaluate to 1, 1 will be set for all claim line
+				case
+					when RevenueCode in ('0490', '0499') then 1
+					when HfSpecialtyId = 8 then 1												-- ProviderSpecialtyCode in ('00Z', '192'), ProviderSpecialtyDesc: 'AMBULATORY FACILITY'
+					else 0
+				end
+				) over (partition by HfClaimId) as IsAmbulatorySurgicalCenter ,		
+			max(		-- Use max() and "partition by" to get results on the claim level. If any claim-line column caused the condition to evaluate to 1, 1 will be set for all claim line
+				case
+					when HCPCS in (select distinct code_id from Maternity.DeliveryCodes with (nolock) where code_type = 'CPT') then 1	-- All 12 CPT codes can be found in the HCPCS column.
+					when ProcedureCodeSurgical in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode1 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode2 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode3 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode4 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode5 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode6 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode7 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode8 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode9 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode10 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode11 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode12 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode13 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode14 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode15 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode16 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode17 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode18 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode19 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode20 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode21 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode22 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode23 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode24 in (select ICDCode from #ICDCodes) then 1
+					when ProcedureCode25 in (select ICDCode from #ICDCodes) then 1
+					else 0
+				end
+				) over (partition by HfClaimId) as IsMaternity, 
+			max(
+				case
+					when -- No incoming claims from COMPANY PLAN have PlaceOfService 23.
+						RevenueCode = '0450' or									-- Keep condition separate.
+						(						
+							ServiceRenderingType in ('FANCL','HOSP') and
+							RevenueCode between '0451' and '0459'				-- Adjusted for Python range.
+							--HCPCS between '99281' and '99285'					-- *Removing this condition. Adjusted for Python range. Part of "PlaceOfService 23" exception.
+							--PlaceOfService = '22' and							-- *Removing this condition. There are other PlaceOfService values where RevenueCode is 0450.
+						)
+						then 1 
+					else 0
+				end
+				) over (partition by HfClaimId) as IsER,
+
+			max(   
+				case	-- Excluding claims that would formertly have PlaceOfService = 23, does not apply to IsInpatient since there is a different RevenueCode range.
+					when  ServiceRenderingType in ('FANCL','HOSP') and
+					(
+						-- RevenueCode has to be within one of the ranges below.
+						(
+							RevenueCode between '0100' and '0179' or				-- Adjusted for Python range.							
+							RevenueCode between '0200' and '0219' or				-- Adjusted for Python range.
+							RevenueCode between '0800' and '0809'				-- Added range.
+						) or
+						(								
+							DiagnosisRelatedGroup is not null and					-- There must be a DiagnosisRelatedGroup.								
+							DiagnosisRelatedGroupType is not null and				-- 99% of the time DiagnosisRelatedGroupType is provided together with DiagnosisRelatedGroup. Ensure it is not set to 'AP'.
+							DiagnosisRelatedGroupType <> 'AP'						-- ALL PATIENT - select * from Main.ReferenceCodes where RefType = 'DRGTYPE';								
+						)
+					)
+					then 1
+					else 0
+				end
+				) over (partition by HfClaimId) as IsInpatient,
+
+			max(
+				case
+					when
+						ServiceRenderingType in ('FANCL','HOSP') and
+						PlaceOfService = '22' and
+						(
+							RevenueCode not between '0450' and '0459' and HCPCS not between '99281' and '99285'	-- "PlaceOfService 23" exception. Adjusted for Python range.
+						)
+						then 1
+					else 0
+				end
+				) over (partition by HfClaimId) as IsOutpatient
+into #tmpBridgeFlags
+from ClaimsData
+WHERE bridge = 7;  -------------------------ADJUST ACCORDINGLY--------------------------------------------------------------------
+
+select distinct * into #tmpBridgeFlagsDistinct from #tmpBridgeFlags;
+
+
+update ClaimsData
+set vendor = b.vendor,
+isUrgentCare =b.isUrgentCare,
+IsAmbulatorySurgicalCenter = b.IsAmbulatorySurgicalCenter,
+IsMaternity = b.IsMaternity,
+IsER = b.IsER,
+IsInpatient = b.IsInpatient,
+IsOutpatient = b.IsOutpatient
+from ClaimsData a
+join #tmpBridgeFlagsDistinct b
+on (a.hfclaimid = b.hfclaimid);
+
+drop table if exists #ICDCodes;
+drop table if exists  #tmpBridgeFlags;
+drop table if exists #tmpBridgeFlagsDistinct;
+
+-------- REMOVAL OF LOWER ADJ NUMBERS (REJECTED CLAIMS) -------
+
+WITH cte AS (
+    SELECT HfClaimid, MAX(ClaimAdjustmentNr) AS mxadjnr
+    FROM ClaimsData
+    GROUP BY HfClaimId
+			)
+		DELETE cft
+		FROM ClaimsData cft
+		JOIN (
+				SELECT DISTINCT cf.HfClaimId, cf.ClaimAdjustmentNr
+				FROM ClaimsData cf
+					INNER JOIN cte ON cf.HfClaimId = cte.HfClaimId
+						WHERE cf.ClaimAdjustmentNr < cte.mxadjnr
+			 ) de 
+			ON cft.HfClaimId = de.HfClaimId
+				AND cft.ClaimAdjustmentNr = de.ClaimAdjustmentNr;
+
+------------------------------------------------------------------------------------------------------------
+
+END
