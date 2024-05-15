@@ -1,0 +1,221 @@
+##### SUPER RAW
+
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Apr 21 10:27:18 2022
+
+@author: cpalmisano
+"""
+
+
+#Load Packages
+import pandas as pd
+import sqlalchemy
+
+#Connect to SQL Server
+con = sqlalchemy.create_engine('mssql://SERVER/DATABASE?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server',
+                               fast_executemany=True)
+
+#Import ACP Physicians List
+acp_physicians = pd.read_excel('B:/PATH/2021 PPL Additions.xlsx')
+
+#Load Affiliation Tokens
+affiliation_tokens = {'Presbyterian': ['presbyterian', 'columbia university medical center', 'weill cornell medical center',
+                                       'david h. koch center', 'david h koch center', 'komansky children', 'rogosin ins',
+                                       'morgan stanley children', 'gracie square', 'payne whitney'],
+                      'NYU Langone': ['nyu langone', 'tisch hospital', 'kimmel pavilion', 'hassenfeld children',
+                                      'nyu lutheran medical center', 'rusk rehabilitation', 'nyu winthrop', 'perlmutter cancer',
+                                      'fink children', 'tisch center', 'winthrop hospital'], 
+                      'Northwell': ['northwell', 'cohen children', 'crouse hospital', 'glen cove hospital', 'huntington hospital', 
+                                    'lenox hill hospital', 'long island jewish', 'manhattan eye', 'mather hospital', 
+                                    'north shore university hospital', 'northern westchester hospital', 'peconic bay medical center',
+                                    'phelps hospital', 'plainview hospital', 'south oaks hospital', 'southside hospital', 
+                                    'staten island university hospital', 'syosset hospital', 'zucker hillside hospital'],
+                      'WMC' : ['westchester medical center', 'maria fareri children', 'behavioral health center', 'bon secours',
+                               'good samaritan hospital', 'healthalliance hospital','health alliance hospital',
+                               'mountainside residential','margaretville hospital','midhudson regional', 'mid hudson regional',
+                               'st anthony community', 'st. anthony community', 'saint anthony community'],
+                      'Adirondack' : ['adirondack medical center', 'adirondack medical ctr'],
+                      'Albany Medical Center': ['albany medical ctr', 'albany medical center'],
+                      'Ascension Health' : ['ascension health', "st. mary's", "st mary's", "saint mary's", 'st. marys', 
+                                            'st marys', 'saint marys'],
+                      'Bassett Healthcare': ['mary imogene bassett hospital', 'bassett healthcare', 'bassett hlthcare',
+                                             'bassett hospital', 'little falls hospital', 'aurelia osborn fox', 
+                                             "o'connor hospital", 'oconnor hospital', 'tri town regional', 'tri-town regional'],
+                      'BLHC' : ['bronxcare', 'bronx care', 'bx lebanon', 'bronx lebanon'],
+                      'Catholic Health LI': ['st catherine of siena', 'st. catherine of siena', 'mercy medical center', 
+                                             'mercy medical ctr', 'st charles hospital', 'saint charles hospital', 
+                                             'st. charles hospital', 'good samaritan hosp', 'st francis hospital', 
+                                             'st. francis hospital', 'saint francis hospital', 'st joseph hospital',
+                                             'st. joseph hospital', 'saint joseph hospital', 'saint catherine of siena'],
+                      'Conifer Park' : ['conifer park'],
+                      'Davita': ['dyker heights dialysis', 'celia dill dialysis', 'eastchester road dialysis', 
+                                 'port chester dialysis', 'south brooklyn nephrology', 'bedford park dialysis',
+                                 'hudson valley dialysis', 'yonkers east dialysis', 'liberty rc'],
+                      'EEHA': ['eastern long island hospital'],
+                      'Gtr Hudson Valley' : ['orange regional med', 'catskill regional med', 'grover m hermann', 
+                                             'grover m. hermann', 'grover hermann', 'hermann hospital'],
+                      'Health Quest' : ['northern dutchess hospital', 'northern dutchess medical center', 
+                                        'vassar brothers', 'hudson valley home care', 'putnam hospital'],
+                      'HRHC' : ['hudson river healthcare', 'hrhc'],
+                      'Maimonides' : ['maimonides'],
+                      'Medisys' : ['flushing hospital', 'jamaica hospital'],
+                      'Montefiore': ['burke rehab', 'montefiore', 'einstein', 'nyack hospital', 'nyack home', 
+                                     "st. john's riverside", "st john's riverside", "saint john's riverside",
+                                     'st. johns riverside', 'st johns riverside', 'saint johns riverside',
+                                     'dobbs ferry pavil', 'white plains hospital', "st. luke's cornwall",
+                                     "st luke's cornwall", "saint luke's cornwall", 'st. lukes cornwall', 'st lukes cornwall',
+                                     'saint lukes cornwall', 'mount vernon hospital', 'mt vernon hospital', 'mt. vernon hospital',
+                                     'new rochelle hospital'],
+                      'Mt Sinai' : ['south nassau communit', 'brooklyn hospital', 'mount sinai', 'mt sinai', 'mt. sinai',
+                                    "st. luke's", "st luke's", "saint luke's", 'st. lukes', 'st lukes', 'saint lukes', 
+                                    'roosevelt hospital', 'jacob perlow', 'mjhs', 'new york eye and ear', 
+                                    'new york eye & ear', 'beth israel'],
+                      'NY Foundling' : ['new york foundling', 'foundling'],
+                      'NYC HHC' : ['cumberland diag', 'nyc health & hosp', 'nyc health + hosp', 'nyc health hosp', 
+                                   'nyc health and hosp', 'seaview hosp', 'gouverneur', 'bellevue hospital', 'bellevue med',
+                                   'woodhull hospital', 'woodhull med'  'lincoln hospital', 'lincoln med', 'hhc health',
+                                   'elmhurst hospital', 'elmhurt med', 'goldwater memorial', 'goldwater hospital', 'goldwater med',
+                                   'kings county hospital', 'metropolitan hospital', 'harlem hospital', 'harlem medical c'
+                                   'north central bronx hospital', 'henry j carter', 'henry j. carter', 'coler memorial',
+                                   'coney island hospital', 'coney island med', 'segundo ruiz', 'jacobi medical', 
+                                   'renaissance health', 'queens hospital', 'gotham health', 'morrisanaia dtc', 'queens general'],
+                     'Planned Parenthood' : ['planned parenthood'],
+                     "St. Peter's Health Partners": ['albany memorial', "st. peter's hospital", "st peter's hospital",
+                                                     "saint peter's hospital", 'st. peters hospital', 'st peters hospital',
+                                                     'saint peters hospital', 'sparc', 'seton health'],
+                     'Stony Brook' : ['southhampton hosp', 'stony brook university hosp', 'stony brook univ hosp'],
+                     'VA' : ['veterans administration', 'vamc', 'veterans affairs medical'],
+                     'Visiting Nurse' : ['visiting nurse', 'vns', 'vna', 'friends clinic'],
+                     'Well Life Network' : ['pederson krag', 'pederson-krag'],
+                     'Wyckoff Heights' : ['wyckoff heights med']}
+
+phys_comp_cols = [x.strip() for x in pd.read_csv('B:/ACP Provider Data/DAC_NationalDownloadableFile.csv', nrows=0).columns]
+phys_comp = pd.read_csv('B:/PATH/DAC_NationalDownloadableFile.csv', names=phys_comp_cols, skiprows=1,
+                        usecols=['NPI','lst_nm','frst_nm','hosp_afl_1','hosp_afl_lbn_1','hosp_afl_2','hosp_afl_lbn_2',
+                                 'hosp_afl_3','hosp_afl_lbn_3','hosp_afl_4','hosp_afl_lbn_4','hosp_afl_5','hosp_afl_lbn_5'])
+
+#Load CMS Physician Compare Dataset
+#phys_comp = pd.read_sql_query("""SELECT DISTINCT cast(ProviderNPI as int) NPI,
+#                              ProviderLastName,
+#                              ProviderFirstName,
+#                              HospitalAffiliationCCN1,
+#                              HospitalAffiliationLBN1,
+#                              HospitalAffiliationCCN2,
+#                              HospitalAffiliationLBN2,
+#                              HospitalAffiliationCCN3,
+#                              HospitalAffiliationLBN3,
+#                              HospitalAffiliationCCN4,
+#                              HospitalAffiliationLBN4,
+#                              HospitalAffiliationCCN5,
+#                              HospitalAffiliationLBN5
+#                              FROM Main.PhysicianCompare""", con)
+phys_comp.columns = ['NPI','Last Name Phys Compare','First Name Phys Compare','Hospital affiliation CCN 1',
+                     'Hospital affiliation LBN 1', 'Hospital affiliation CCN 2', 'Hospital affiliation LBN 2', 
+                     'Hospital affiliation CCN 3', 'Hospital affiliation LBN 3', 'Hospital affiliation CCN 4',
+                     'Hospital affiliation LBN 4', 'Hospital affiliation CCN 5', 'Hospital affiliation LBN 5']
+phys_comp['NPI'] = pd.to_numeric(phys_comp['NPI']).astype(int)
+
+#Join Phys Compare to Physician List
+acp_physicians = acp_physicians.merge(phys_comp, how = 'left', left_on='NPI', right_on='NPI')
+
+#Search For Affiliation Tokens in Physician Compare
+affiliation = []
+tokens = []
+for idx in range(len(acp_physicians)):
+    result = acp_physicians.iloc[idx]
+    afi = []
+    tkn = []
+    for rslt in result[11:20:2]:
+        if type(rslt) == str: 
+            rslt = rslt.lower()
+            for affil in affiliation_tokens:
+                values = affiliation_tokens[affil]
+                for token in values:
+                    if token in rslt:
+                        afi.append(affil)
+                        tkn.append(token)
+        else:
+            break
+    afi = list(set(afi))        
+    affiliation.append(afi)
+    tokens.append(tkn)
+    
+#Load  Clinically Integrated Network Providers
+mshs_cin_providers = pd.read_csv('//PATH/CIN_Network  012519.csv')
+mshs_npis = CIN_providers['NPI'].astype('Int64').unique()
+
+#Load NYP Affiliated NPI List
+nyp_affiliated = pd.read_fwf('//PATH/nyp_npis.txt')
+nyp_npis = nyp_affiliated['npi'].astype('Int64').unique()
+
+#Load Manual Non-Preferred Lookup Results
+non_pref_match = pd.read_csv('//PATH/nonpreferred_match_results.csv')
+non_pref_match = non_pref_match[non_pref_match['npi'].notna()]
+northwell_match = non_pref_match[non_pref_match['system'] == 'NORTHWELL'].iloc[:,1].astype('Int64').unique()
+nyu_match = non_pref_match[non_pref_match['system'] == 'NYU'].iloc[:,1].astype('Int64').unique()
+presby_match = non_pref_match[non_pref_match['system'] == 'PRESBYTERIAN'].iloc[:,1].astype('Int64').unique()
+wmc_match = non_pref_match[non_pref_match['system'] == 'WESTCHESTER'].iloc[:,1].astype('Int64').unique()
+
+#Create Iterator List
+affiliations = {'mshs_npis': mshs_npis, 
+                'nyp_npis': nyp_npis, 
+                'northwell_match': northwell_match, 
+                'nyu_match': nyu_match, 
+                'presby_match': presby_match, 
+                'wmc_match': wmc_match}
+
+for i in affiliations:
+    field = affiliations[i]
+    acp_physicians[i] = acp_physicians['NPI'].isin(field)
+
+#Import Non-Preferred Referral Information
+referrals = pd.read_sql("""
+SELECT npi, provider_name,
+	count(*) as distinct_refs, 
+	count(distinct ssn) as distinct_ssns, 
+	sum(case when system = 'NEW YORK PRESBYTERIAN HEALTH CENTER' then 1 else 0 end) as presby_refs,
+	count(distinct case when system = 'NEW YORK PRESBYTERIAN HEALTH CENTER' then ssn else NULL end) as presby_distinct_ssns,
+	sum(case when system = 'NORTHWELL HEALTH' then 1 else 0 end) as northwell_refs,
+	count(distinct case when system = 'NORTHWELL HEALTH' then ssn else NULL end) as northwell_distinct_ssns,
+	sum(case when system = 'NYU LANGONE MEDICAL CENTER' then 1 else 0 end) as nyu_refs,
+	count(distinct case when system = 'NYU LANGONE MEDICAL CENTER' then ssn else NULL end) as nyu_distinct_ssns,
+	sum(case when system = 'WESTCHESTER MEDICAL CENTER HEALTH NETWORK' then 1 else 0 end) as wmc_refs,
+	count(distinct case when system = 'WESTCHESTER MEDICAL CENTER HEALTH NETWORK' then ssn else NULL end) as wmc_distinct_ssns
+FROM PHYSICIAN_TO_FACILITY_REFS
+WHERE system in ('NEW YORK PRESBYTERIAN HEALTH CENTER', 'NORTHWELL HEALTH', 'NYU LANGONE MEDICAL CENTER', 
+    'WESTCHESTER MEDICAL CENTER HEALTH NETWORK') and npi is not null
+GROUP BY npi, provider_name""", con)
+
+#Join Referrals Onto IFH List
+acp_physicians = acp_physicians.merge(referrals, how = 'left', left_on='NPI', right_on='npi')
+
+#Calculate ACP Score
+def acp_score(row):
+    score = 0
+    if row['mshs_npis']:
+        score = score - 5
+    if row['nyp_npis']:
+        score = score + 5
+    if row['northwell_match']:
+        score = score + 3
+    if row['nyu_match']:
+        score = score + 3
+    if row['presby_match']:
+        score = score + 3
+    if row['wmc_match']:
+        score = score + 3
+#    if row['Provider Group (grp 11)'] in ['EH Non Preferred  [4]', 'NW Employed [2]', 'NW Affiliate [3]']:
+#        score = score + 7
+    if row['distinct_refs'] >= 1:
+        score = score + row['distinct_refs']
+    return score
+    
+acp_physicians['score'] = acp_physicians.apply(acp_score, axis=1)
+acp_physicians.drop_duplicates(inplace=True)
+#Sort On Score
+acp_physicians.sort_values(by='score', ascending=False, inplace=True)
+
+#Return Sorted Results With New Index and save to CSV
+acp_physicians.reset_index(drop=True, inplace=True)
+acp_physicians.to_csv('//PATH/ACP Affiliations and Scores 082021.csv', index=False)
