@@ -1,0 +1,496 @@
+"""
+Created on Tue Sep 12 10:37:19 2023
+
+@author: cpalmisano
+
+*** This is a mix of both the first time pull code and code that will do the daily(?) pulls
+*** When more information comes from the business team the code will solidify more
+
+"""
+
+#Load Python Packages
+import pandas as pd
+import os
+import gzip
+from functools import wraps
+
+
+# Function to decompress the file
+def decompress_file(file_path):
+    with gzip.open(file_path, 'rb') as f:
+        decompressed_content = f.read()
+    return decompressed_content
+
+
+#### @timeit records the time a function starts / stops 
+import time
+
+def timeit(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        end = time.perf_counter()
+        print(f'{func.__name__} took {end - start:.6f} seconds to complete')
+        return result
+    return wrapper
+
+
+
+###################################Daily claims data pull #####################################
+# @timeit
+# def newest_with_extension(path, extension):
+#     '''
+#     Parameters
+#     ----------
+#     path : str
+#         Path to the directory containing files.
+#     extension : str
+#         Desired file extension to filter for.
+
+#     Returns
+#     -------
+#     str or None
+#         The path to the newest file with the specified extension or None if no such file exists.
+#     '''
+#     files = os.listdir(path)
+#     filtered_files = [f for f in files if not f.startswith("~$") and f.endswith(extension)]
+    
+#     if not filtered_files:
+#         return None  # No files with the specified extension found
+    
+#     paths = [os.path.join(path, basename) for basename in filtered_files]
+#     return max(paths, key=os.path.getctime)
+
+
+# def second_newest_with_extension(path, extension):
+#     '''
+#     Parameters
+#     ----------
+#     path : str
+#         Path to the directory containing files.
+#     extension : str
+#         Desired file extension to filter for.
+
+#     Returns
+#     -------
+#     str or None
+#         The path to the second newest file with the specified extension or None if no such file exists.
+#     '''
+#     files = os.listdir(path)
+#     filtered_files = [f for f in files if not f.startswith("~$") and f.endswith(extension)]
+    
+#     if len(filtered_files) < 2:
+#         return None  # Less than two files with the specified extension found
+    
+#     paths = [os.path.join(path, basename) for basename in filtered_files]
+#     second_newest_path = sorted(paths, key=os.path.getctime)[-2]
+#     return second_newest_path
+
+
+# ## file path
+# claims = '// PATH /WGS//'
+
+# ##pull newest file with correct file type
+# claims_file = newest_with_extension(claims, '.out.gz.pgp')
+
+# ############################# pull second newest file with correct file type  ###########################
+# #claims_file = second_newest_with_extension(claims, '.out.gz.pgp')
+
+# @timeit
+# def process_claims_files(daily_file_path):
+#     # Read in Specs for file location and Data Dictionary Details with full data
+#     dd_map = pd.read_excel('// PATH /DataDictionary/Layout_2022.xlsx',
+#                            sheet_name='Claims')
+    
+#     # Extract all column names from the Data Dictionary
+#     fields = dd_map['Field Name'].str.strip().tolist()
+    
+#     start_pos = dd_map['Start Position']
+#     end_pos = dd_map['End Position']
+#     positions = []
+    
+#     for i in range(len(dd_map)):
+#         pos = [start_pos[i] - 1, end_pos[i]]
+#         positions.append(pos)
+    
+#     # Daily pull from file
+#     with gzip.open(daily_file_path) as f:
+#         df_day = pd.read_fwf(f, names=fields, colspecs=positions)
+#         df_day['File'] = daily_file_path.split("/")[-1]
+    
+#     return df_day
+
+# #pull in most recent daily file
+# df = process_claims_files(claims_file)
+
+
+# df = df[['PERSON_ID',  'ClaimNr',
+#     'PlaceOfService', 'ServiceStartDate', 'ServiceEndDate' , 'PatientDOB']]   
+
+#######################################################################################
+
+
+import gc
+import inspect
+import pyodbc
+import sqlalchemy
+
+@timeit
+def close_all_connections():
+    """
+    This function will close all open connections
+    """
+    for obj in gc.get_objects():
+        if inspect.ismodule(obj):
+            for name in dir(obj):
+                if name == "engine":
+                    engine = getattr(obj, name)
+                    if isinstance(engine, sqlalchemy.engine.Engine):
+                        engine.dispose()
+                elif name == "conn":
+                    conn = getattr(obj, name)
+                    if conn is not None and isinstance(conn, pyodbc.Connection):
+                        try:
+                            conn.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+                elif name == "con":
+                    con = getattr(obj, name)
+                    if con is not None and isinstance(con, pyodbc.Connection):
+                        try:
+                            con.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+                elif name == "cursor":
+                    cursor = getattr(obj, name)
+                    if cursor is not None and isinstance(cursor, pyodbc.Cursor):
+                        try:
+                            cursor.close()
+                        except pyodbc.ProgrammingError:
+                            pass
+
+
+####Connection 
+@timeit
+def connect_to_sql_server(server_name, database_name):
+    # connect via pyodbc
+    conn = pyodbc.connect(f'Driver={{SQL Server}};Server={server_name};Database={database_name};Trusted_Connection=yes;')
+    
+    # connect via sqlalchemy
+    con = sqlalchemy.create_engine(f'mssql://{server_name}/{database_name}?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server', fast_executemany=True)
+    
+    return conn, con
+
+
+# connection to server -> SERVER   db -> DATABASE
+conn, con = connect_to_sql_server('SERVER', 'DATABASE')
+cursor = conn.cursor()
+conn.autocommit = True 
+
+
+###!!!  Data pull
+df = pd.read_sql('''WITH CTE AS (
+                          SELECT DISTINCT
+                            person_id, PatientDOB, ServiceStartDate, 
+                            COUNT(dc.dx) AS visits,
+                            dc.condition AS condition
+                          FROM ClaimsData cd WITH (NOLOCK)
+                          LEFT JOIN DxCategories dc ON cd.DiagnosisCodePrincipal = dc.dx
+                            OR cd.diagnosiscode1 = dc.dx
+                            OR cd.diagnosiscode2 = dc.dx
+                            OR cd.diagnosiscode3 = dc.dx
+                          WHERE dx IS NOT NULL
+                            AND ServiceStartDate > GETDATE() - 400
+                            GROUP BY condition, person_id, PatientDOB, ServiceStartDate
+                                    )
+                                        SELECT
+                                          PERSON_ID,
+                                          MAX(CASE WHEN [condition] = 'diabetes' AND [visits] >= 1 THEN 1 ELSE 0 END) AS diabetes, -- +1 Rx
+                                          MAX(CASE WHEN [condition] = 'diabetes' AND [visits] >= 3 THEN 1 ELSE 0 END) AS diabetes2, --- OR 3 Rx months
+                                          MAX(CASE WHEN [condition] = 'stroke' AND [visits] >= 1 THEN 1 ELSE 0 END) AS stroke,
+                                          MAX(CASE WHEN [condition] = 'htn' AND [visits] >= 2 THEN 1 ELSE 0 END) AS htn, --- + 2 Rx
+                                          MAX(CASE WHEN [condition] = 'htn_renal' AND [visits] >= 2 THEN 1 ELSE 0 END) AS htn_renal,
+                                          MAX(CASE WHEN [condition] = 'cad' AND [visits] >= 3 AND DateDiff(YEAR, PatientDOB, GETDATE()) >= 18 THEN 1 ELSE 0 END) AS cad, 
+                                          MAX(CASE WHEN [condition] = 'chf' AND [visits] >= 3 AND DateDiff(YEAR, PatientDOB, GETDATE()) >= 18 THEN 1 ELSE 0 END) AS chf,
+                                          MAX(CASE WHEN [condition] = 'copd' AND [visits] >= 2 THEN 1 ELSE 0 END) AS copd,
+                                          MAX(CASE WHEN [condition] = 'asthma' AND [visits] >= 1 THEN 1 ELSE 0 END) AS asthma, -- +1 RX
+                                          MAX(CASE WHEN [condition] = 'pad' AND [visits] >= 2 THEN 1 ELSE 0 END) AS pad
+                                        FROM CTE
+                                            WHERE person_id IS NOT NULL
+                                            AND DATEDIFF(YEAR, PatientDOB, GETDATE()) >= 18
+                                             GROUP BY person_id
+                                              ORDER BY person_id; ''', con)
+
+
+# Eligibility query and funds_ enrollment
+
+funds_enrollment = pd.read_sql('''
+     Select distinct em.person_id, funds_enrollmentId as funds_engagement ,  em.ZIP as zip, catchment 
+ -- ,statuscode, statuscodename,
+ --statecode, statecodename,
+ --funds_program, funds_programname
+ --, funds_sourcename, 
+--    funds_dateactive, funds_closedate, funds_facilityname, 
+       -- funds_outreach, funds_warningdate, funds_warningreason 
+		from funds_enrollment fe  WITH (NOLOCK)
+			Inner Join (SELECT PERSON_ID , ZIP
+                        FROM Main.EligMedical 
+                           where GETDATE() BETWEEN [START_DATE] AND [STOP_DATE]
+					)	em	
+					ON fe.person_id = em.PERSON_ID
+			LEFT JOIN FiveStar_CatchmentZips cz
+				ON cz.zip = em.ZIP
+		 where not exists (select 1 from d365.funds_enrollment e2
+                  where e2.person_id = fe.person_id
+                  and e2.funds_program = '268300000' and e2.statecode = 0)  --members does not have an active wellness engagement
+	AND not exists (select 1 from d365.funds_enrollment e2
+                  where e2.person_id = fe.person_id
+                  and e2.statuscode = '268300313' and e2.funds_program = '268300000')  --Member has not self disenrolled from Wellness program
+	AND not exists (select 1 from d365.funds_enrollment e2
+                  where e2.person_id = fe.person_id
+                  and e2.funds_outcome = '268300001' and e2.funds_program = '268300000') --member does not have a logged disinterest in the wellness program
+                         ''', con)
+#################################
+##funds_program   268300000 = WELLNESS
+
+df = df.rename(columns={'PERSON_ID':'person_id'})
+
+#change PERSON_ID to str
+df['person_id'] = df['person_id'].astype(str)
+df['person_id'] = df['person_id'].str.lstrip('BSF00$')
+
+
+funds_enrollment['person_id'] = funds_enrollment['person_id'].astype(str)
+funds_enrollment['person_id'] = funds_enrollment['person_id'].str.rstrip('.0')
+df['person_id'] = df['person_id'].str.rstrip('.0')
+
+
+#merge df and funds_enrollment
+merge_df = funds_enrollment.merge(df, left_on='person_id', right_on='person_id', how='left')
+
+
+# #change to string for ease of use
+# merge_df['funds_program'] = merge_df['funds_program'].astype(str)
+
+
+#Drop any dupes 
+merge_df = merge_df.drop_duplicates()
+
+
+'''
+ REQUIREMENTS
+Person must have medical health eligiblity along with prescription/pharmacy benefits
+Person must live or work near a 5 Star center that provides primary care services - They have a Recommended 5 Star Center on Dynamics 
+Person does not have an engagement in funds_enrollment with Statecodename = ‘Active’ and Funds_programname = ‘Wellness’ 
+Person does not have an engagement in d365.funds_enrollment with Statuscodename = 'Self Disenroll', funds_programname = 'Wellness'
+Perons does not have an engagment in D365.funds_enrollment with funds_outcomename = 'Not Interested' and funds_programname = 'Wellness'
+'''
+
+## query for diabetes, GPI and AHFS codes 
+diabetes = pd.read_sql('''
+        SELECT DISTINCT person_id
+          ,count(distinct(ClaimNr)) as claims_cnt  --- count the Rxs 
+          ,CASE WHEN DATEDIFF(MONTH, MIN(FillDate), MAX(FillDate)) >= 2 THEN 1 ELSE 0 END AS has_three_months  --if they have 3 separate months filled
+          ,SUM(CASE WHEN drx.gpi = rxc.GPI then 1 else 0 end) as diabetes_gpi ----diabetes GPIs 
+          ,SUM(CASE WHEN AHFS IN ('12121200','12120812','12080800','48489200','52020000','86160000') THEN 1 ELSE 0 END) AS asthma_ahfs
+          ,SUM(CASE WHEN AHFS IN ('24081600','24082400','24084400','24200000','24240000','24280800','24289200','24320400') THEN 1 ELSE 0 END) AS htn_ahfs
+        FROM optumrx.Claims rxc
+          LEFT JOIN hsmember.DiabetesRx drx ON drx.gpi = rxc.GPI
+           WHERE FileProcessDate >= GETDATE() - 400
+           group by person_id''', con) 
+
+diabetes['person_id'] = diabetes['person_id'].astype(str)
+diabetes['person_id'] = diabetes['person_id'].str.rstrip('.0')
+
+well = pd.merge(left=merge_df, right=diabetes, on='person_id', how='left')
+
+#Fill nan as 0 
+well = well.fillna(0)
+
+#Drop any dupes 
+well = well.drop_duplicates()
+
+##-------------------------------------------------------------------------------------------
+
+##### This should filter the table for the various aspects
+
+# Filter for Diabetes
+diabetes = well[
+    (well['diabetes'].astype(bool) & well['diabetes_gpi'])  # 1 dx and 1 rx
+    | (well['diabetes2'].astype(bool))  # 3 visits
+    | (well['has_three_months'] ==1)  # 3 separate months with rx
+]
+
+# Filter for Asthma
+asthma = well[
+    (well['asthma'].astype(bool)  & well['asthma_ahfs'] >=1)  # 1 dx and 1 steroid rx
+]
+
+# Filter for Hypertension
+hypertension = well[
+    (well['htn'].astype(bool)  & well['htn_ahfs'] >= 2)  # 2 dx and 2 rx
+]
+
+# Filter for Stroke
+stroke = well[
+    (well['stroke'] == 1) 
+]
+
+# Filter for htn renal
+htn_renal = well[
+    (well['htn_renal'] == 1) 
+]
+
+# Filter for cad
+cad = well[
+    (well['cad'] == 1) 
+]
+
+# Filter for chf
+chf = well[
+    (well['chf'] == 1) 
+]
+
+# Filter for copd
+copd = well[
+    (well['copd'] == 1) 
+]
+
+# Filter for pad
+pad = well[
+    (well['pad'] == 1) 
+]
+
+
+
+# List of your filtered DataFrames (replace with actual names)
+filtered_dfs = [asthma, diabetes, hypertension, stroke, htn_renal, cad, chf, copd, pad]
+
+# Combine filtered DataFrames
+all_conditions = pd.concat(filtered_dfs, ignore_index=True)
+
+# # filter to just the person_id
+# well_persons = all_conditions[['person_id', 'funds_engagement']]
+
+# # Drop duplicates if a person can appear in multiple conditions
+# well_persons = well_persons.drop_duplicates()
+
+# #change to dataframe 
+# well_persons = pd.DataFrame(well_persons) 
+
+
+################ ONE TIME LOAD ##############
+## filter to just the person_id
+well_persons = all_conditions['person_id']
+
+## Drop duplicates if a person can appear in multiple conditions
+well_persons = well_persons.drop_duplicates()
+
+## change to dataframe 
+well_persons = pd.DataFrame(well_persons) 
+
+
+# Set up new columns for Dynamics integration 
+well_persons['source'] = 'Claims'               ###============================
+well_persons['program'] = 'Wellness'            ###============================
+well_persons['Notes'] = 'TEST NOTE'              ###============================
+well_persons['action'] = 'Outreach'       ###============================
+well_persons['funds_action'] = pd.NA
+well_persons['funds_source'] = pd.NA
+well_persons['funds_casenumber'] = pd.NA
+well_persons['funds_dateofservice'] = pd.NA
+well_persons['funds_disease'] = pd.NA
+well_persons['funds_provider'] = pd.NA
+well_persons['funds_facility'] = pd.NA
+well_persons['funds_futureMomsRegistrationDate'] = pd.NA
+well_persons['funds_name'] = pd.NA
+well_persons['funds_person'] = pd.NA
+well_persons['funds_program'] = pd.NA
+well_persons['funds_rebateeligible'] = pd.NA
+well_persons['funds_score'] = pd.NA
+well_persons['funds_procedure_multiselect'] = pd.NA
+well_persons['funds_issecondaryinsurance'] = pd.NA
+well_persons['funds_episodesid'] = pd.NA
+well_persons['errormessage'] = pd.NA
+well_persons['errorcreatedon'] = pd.NA
+well_persons['d365syncedon'] = pd.NA
+
+
+# #### Compare new episodes with history to not provide dupes
+# welleps = pd.read_sql("""
+# select person_id, program, funds_engagement, funds_episodesid, d365syncedon 
+# from d365.src_funds_episodes
+# where Action = 'Outreach'
+#                        """, con)
+                       
+# # change to object for ease of use
+# welleps['person_id'] = welleps['person_id'].astype(object)
+
+# #well_persons = well_persons.rename(columns={'funds_enrollmentId': 'funds_engagement'})
+
+# # Perform an inner join with indicator to mark matching rows
+# dup_eps = welleps.merge(well_persons, on=['person_id', 'funds_engagement'], how='inner', indicator=True)
+
+# # index fixing
+# dup_eps = dup_eps.reset_index(drop=True)
+# well_persons = well_persons.reset_index(drop=True)
+
+# ## identify if episodes have already been created "both" 
+# drop_indices = dup_eps[dup_eps['_merge'] == 'both']['funds_engagement']
+
+# # Drop rows from table based on the engagement from the merged DataFrame
+# well_persons.drop(well_persons[well_persons['funds_engagement'].isin(drop_indices)].index, inplace=True)
+
+#############################################!!!
+##Clean up and touch up
+
+#Add updated date
+from datetime import datetime
+today = datetime.today().date()
+well_persons['DateCreated'] = pd.to_datetime(today)
+
+
+well_test = well_persons.head(100)
+
+
+#!!!
+### Insert data into SQL Server
+print('Wellness Enrollment Complete')  
+ 
+
+# ## code to upload dataframe to SQL Server
+# try:    ## History
+#     conn.commit()    
+#     well_persons.to_sql( 'well_enroll_his', con, schema='Wellness', index=False, chunksize=1000, if_exists='append')   
+#     print("History uploaded successfully!")
+    
+# except Exception as e:
+#     print("Error uploading History:", e)
+    
+# finally:
+#     print("Wellness Recruitment History Loaded")
+    
+# try:    ## Enrollments
+#     conn.commit()    
+#     #well_test.to_sql( 'well_enroll', con, schema='Temp', index=False, chunksize=1000, if_exists='append') 
+#     #well_persons.to_sql( 'src_funds_episodes', con, schema='SCHEMA', index=False, chunksize=1000, if_exists='append')   
+#     print("Wellness Recruitment uploaded successfully!")
+    
+# except Exception as e:
+#     print("Error uploading Recruitment:", e)
+
+# finally:
+#     print("Wellness Recruitment Loaded")   
+
+##close all connections
+try:
+  #  close_out_job_log(cursor, job_id)
+    close_all_connections()
+    #session.close()
+
+except:
+    print('session close failed')
+
+finally:
+    print('session closed')   
