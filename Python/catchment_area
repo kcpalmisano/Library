@@ -5,18 +5,21 @@ Created on Wed Jan 31 11:24:28 2023
 @author: cpalmisano
 """
 
+from datetime import datetime
+from geopy.geocoders import Nominatim
 import pandas as pd
 import gc
 import inspect
-from datetime import  date
+from datetime import date
 import pyodbc
 import sqlalchemy
-from sqlalchemy.orm import sessionmaker 
+from sqlalchemy.orm import sessionmaker
 import math
 import geopy.distance
 from geopy.distance import great_circle
 
 #!!!
+
 
 def close_all_connections():
     """
@@ -52,39 +55,42 @@ def close_all_connections():
                             pass
 
 
-####Connection 
+# Connection
 def connect_to_sql_server(server_name, database_name):
     # connect via pyodbc
-    conn = pyodbc.connect(f'Driver={{SQL Server}};Server={server_name};Database={database_name};Trusted_Connection=yes;')
-    
+    conn = pyodbc.connect(
+        f'Driver={{SQL Server}};Server={server_name};Database={database_name};Trusted_Connection=yes;')
+
     # connect via sqlalchemy
-    con = sqlalchemy.create_engine(f'mssql://{server_name}/{database_name}?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server', fast_executemany=True)
-    
+    con = sqlalchemy.create_engine(
+        f'mssql://{server_name}/{database_name}?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server', fast_executemany=True)
+
     return conn, con
 
-###------------------------------------------------------ #!!!
+# ------------------------------------------------------ #!!!
+
 
 # connection to server -> SERVER   db -> DATABASE
 conn, con = connect_to_sql_server('SERVER', 'DATABASE')
 cursor = conn.cursor()
-conn.autocommit = True 
+conn.autocommit = True
 
-con = sqlalchemy.create_engine('mssql://SERVER/DATABASE?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server', fast_executemany=True)    
+con = sqlalchemy.create_engine(
+    'mssql://SERVER/DATABASE?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server', fast_executemany=True)
 Session = sessionmaker(bind=con)
-session = Session()   
+session = Session()
 
 # SQL query to fetch data from the database
 coe_locs = pd.read_sql("""
 SELECT funds_coetype, funds_coetypename, funds_name, funds_address1_postalcode as zip, funds_fein
 , funds_address1_line1 + ' ' + funds_address1_city + ', ' +  funds_address1_stateorprovince + ' ' + funds_address1_postalcode  as Address
 , NULL as latitude, NULL as longitude
-FROM TABLE
+FROM [funds_providerorganization]
   WHERE funds_parentorganization IS NULL and funds_coetype IS NOT NULL
-""", con) 
+""", con)
 
 
 #!!!
-from geopy.geocoders import Nominatim
 
 # Initialize Nominatim geocoder with user_agent header
 geolocator = Nominatim(user_agent="coe_facilities")
@@ -95,44 +101,51 @@ addresses = coe_locs['Address'].apply(str).tolist()
 # Create an empty list to store zip codes within 50 miles radius
 zip_codes_in_radius = []
 
-## 1-1 hopsital lat/long from google maps based on address
-#Current hardcode as of 2/15/2024
+# 1-1 hopsital lat/long from google maps based on address
+# Current hardcode as of 4/24/2024
 hospitals = [
-(42.250606, -71.078271), 
-(40.462253, -79.946908),
-(42.466401, -71.123150),
-(40.805544, -73.961967),
-(41.774682, -72.699529),
-(26.187342, -80.120705),
-(40.428361, -79.748843),
-(41.552679, -73.035679),
-(40.984672, -74.100776),
-(40.435682, -79.766520),
-(42.111765, -80.079800),
-(40.635625, -80.064512),
-(40.635625, -80.064512),
-(40.770071, -73.987758),
-(26.195650, -80.133656),
-(42.400935, -71.279475),
-(42.330175, -71.107233),
-(39.957740, -75.200006),
-(39.944693, -75.156461),
-(39.944693, -75.156461) ]
+    (42.250606, -71.078271),  # BETH ISRAEL DEACONESS MILTON
+    (40.462253, -79.946908),  # WEST PENN HOSPITAL
+    (42.466401, -71.123150),  # WINCHESTER HOSPITAL
+    (40.805544, -73.961967),  # MOUNT SINAI MORNINGSIDE
+    (41.774682, -72.699529),  # SAINT FRANCIS HOSPITAL AND MEDICAL CENTER
+    (26.187342, -80.120705),  # HOLY CROSS HEALTH - FORT LAUDERDALE
+    (40.428361, -79.748843),  # FORBES HOSPITAL
+    (41.552679, -73.035679),  # SAINT MARYS HOSPITAL
+    (40.965055, -74.072562),  # THE VALLEY HOSPITAL updated 4/24/2024
+    (40.435682, -79.766520),  # MONROEVILLE SURGERY CENTER
+    (42.111765, -80.079800),  # ST VINCENT HOSPITAL
+    (40.635625, -80.064512),  # WEXFORD HOSPITAL
+    (40.635625, -80.064512),  # WEXFORD SURGERY CENTER
+    (40.770071, -73.987758),  # MOUNT SINAI WEST
+    (26.195650, -80.133656),  # PHYSICIANS OUTPATIENT SURGERY CENTER
+    (42.400935, -71.279475),  # BOSTON OUTPATIENT SURGICAL SUITES
+    (42.330175, -71.107233),  # NEW ENGLAND BAPTIST HOSPITAL
+    (39.957740, -75.200006),  # PENN PRESBYTERIAN MEDICAL CENTER
+    (39.944693, -75.156461),  # PENNSYLVANIA HOSPITAL
+    (39.944693, -75.156461)]  # PENNSYLVANIA HOSPITAL
 
 
-## one-to-one mapping of lat/long
-coe_locs[["latitude", "longitude"]] = pd.DataFrame(hospitals, columns=["latitude", "longitude"])
+# one-to-one mapping of lat/long
+coe_locs[["latitude", "longitude"]] = pd.DataFrame(
+    hospitals, columns=["latitude", "longitude"])
 
 
 df = coe_locs
 
 #!!!
-#load in all zip codes 
-zips = pd.read_excel(r'C:/PATH/Ad Hoc/zip_codes.xlsx')
+# # load in all zip codes
+# zips = pd.read_excel(
+#     r'C:/Users/cpalmisano/PATH/Ad Hoc/zip_codes.xlsx')
 
 
-#fill missing zeros in zipcode due to Excel being bitchy
-zips['zip'] = zips['zip'].apply(lambda x: '{:05d}'.format(x))
+zips = pd.read_sql('''
+                   select distinct ZipCode as zip, Latitude as latitude, Longitude as longitude
+                     from main.zipcodes
+                   ''', con)
+
+# # fill missing zeros in zipcode due to Excel being bitchy
+# zips['zip'] = zips['zip'].apply(lambda x: '{:05d}'.format(x))
 
 
 # Initialize Nominatim geocoder with user_agent header
@@ -151,7 +164,8 @@ for index, row in df.iterrows():
         (zips["latitude"] >= address_lat - radius_km / 111.11) &
         (zips["latitude"] <= address_lat + radius_km / 111.11) &
         (zips["longitude"] >= address_long - radius_km / (111.11 * math.cos(address_lat * math.pi / 180))) &
-        (zips["longitude"] <= address_long + radius_km / (111.11 * math.cos(address_lat * math.pi / 180)))
+        (zips["longitude"] <= address_long + radius_km /
+         (111.11 * math.cos(address_lat * math.pi / 180)))
     ]
 
     # Calculate distances and filter within radius
@@ -159,32 +173,110 @@ for index, row in df.iterrows():
     for i, zip_row in filtered_zips.iterrows():
         zip_lat = zip_row["latitude"]
         zip_long = zip_row["longitude"]
-        distance = great_circle((address_lat, address_long), (zip_lat, zip_long)).km
+        distance = great_circle(
+            (address_lat, address_long), (zip_lat, zip_long)).km
         if distance <= radius_km:
             zip_distances.append((distance, zip_row["zip"]))
 
     # Sort zip codes by distance and store as comma-separated string
     zip_distances.sort(key=lambda x: x[0])
-    df.loc[index, "zip_codes_in_radius"] = ", ".join([str(code) for _, code in zip_distances])
+    df.loc[index, "zip_codes_in_radius"] = ", ".join(
+        [str(code) for _, code in zip_distances])
 
-from datetime import datetime
 
-#Add updated date
+# Add updated date
 today = datetime.today().date()
 df['date_updated'] = pd.to_datetime(today)
 
+#!!!  all listed member zip codes 
+sql = pd.read_sql('''
+select distinct memberzipcode as zip
+ from ClaimsData
+order by memberzipcode desc
+''', con)
+
+
+
+
+
+# Concatenate DataFrames and assign the result
+all_zips = pd.concat([zips, sql], join='outer', ignore_index=True)
+
+# Filter and clean zip codes (optional)
+if not all_zips.empty:  # Check if 'all_zips' is not empty
+    all_zips = all_zips.dropna()
+    all_zips = all_zips.drop_duplicates()
+
+
+
+# Extract zip codes, strip spaces, and create a DataFrame
+additional_column_name = 'funds_coetype'  # Replace with the actual column name
+
+zip_codes_df = pd.DataFrame({
+    'all_zip_codes': [
+        [item.strip() for item in sublist if item]  # Existing zip code processing
+        for sublist in df['zip_codes_in_radius'].str.split(',')
+    ],
+    additional_column_name: df[additional_column_name].tolist()  # Access the additional column
+})
+
+
+
+# create dataframe with zips and coe type
+exploded_df = zip_codes_df.explode('all_zip_codes')  # Explode 'zips' column into separate rows
+
+
+if exploded_df.empty:
+    # Handle empty DataFrame scenario (e.g., assign False to 'catchment' column)
+    zips['catchment'] = False
+else:
+    # Use vectorized operations for efficiency
+    zips['catchment'] = zips['zip'].isin(exploded_df['all_zip_codes'])
+
+
+# check to see counts 
+counts = zips['catchment'].value_counts()
+
+#change to 1 / 0 
+zips['catchment'] = zips['catchment'].astype(int)
+
+#bring together
+merged_df = pd.merge(zips, exploded_df, left_on='zip', right_on='all_zip_codes', how='left')
+
+#Drop extra zip column
+merged_df = merged_df.drop(['all_zip_codes',  'latitude', 'longitude'], axis=1)
+
+# Change to 1 / 0 boolean 
+merged_df['catchment'] = merged_df['catchment'].astype(int)
+
 
 #!!!
-### Insert data into SQL Server
-print('Catchment Complete')  
+# Insert data into SQL Server
+conn.commit()
 
-conn.commit()                 #code to upload dataframe to SQL Server
-df.to_sql( 'TABLE', con, schema='SCHEMA', index=False, chunksize=1000, if_exists='replace')   
+try:
+    df.to_sql('COE_CatchmentZips', con, schema='SCHEMA',
+              index=False, chunksize=1000, if_exists='replace')
 
-print("Catchment Loaded")
+except:
+    print('load faild')
+
+finally:
+    print("Catchment Loaded")
 
 
-#close all connections
+try:
+    merged_df.to_sql('CatchmentZips', con, schema='SCHEMA',
+              index=False, chunksize=1000, if_exists='replace')
+
+except:
+    print('load failed')
+
+finally:
+    print("Catchment Loaded")
+
+
+# close all connections
 try:
     close_all_connections()
     session.close()
@@ -194,3 +286,4 @@ except:
 
 finally:
     print('session closed')
+
