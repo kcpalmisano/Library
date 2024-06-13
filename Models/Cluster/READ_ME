@@ -1,0 +1,12 @@
+Business provided hard locations for COEs (Centers of Excellence) (lat/long)
+Using home and work locations for members, plot their closest COE. 
+
+I had issues with rivers and boarders based on the data provided, so I ended up creating by each borough 
+and then bringing them all back in to have one large dataset. 
+
+
+Next steps is to bring in MTA API and show best travel routes for locations. Live feed is not needed but a best recommended 
+route on usual circumstances refreshed every day is the current business goal. This is to be put into our Member Portal for 
+  ease of use for our members to see directly their best route. 
+
+
