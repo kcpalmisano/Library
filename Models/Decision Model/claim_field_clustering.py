@@ -317,6 +317,7 @@ df['cluster'] = cluster_labels
 #########
 ##visualize the clustering 
 clustermap = sns.clustermap(full_matrix, method='ward', metric='euclidean', cmap="ocean_r", annot=False, fmt=".2f")
+plt.title(f"Clustermap with Ordered Rows and Columns (Estimated Clusters: {n_clusters})", pad=20)
 
 # Extract data and cluster labels
 data = clustermap.data
@@ -369,6 +370,8 @@ df_ordered = full_matrix.iloc[dendrogram(row_linkage, no_plot=True)['leaves'],
 
 # Generate clustermap with heatmap 
 sns.clustermap(df_ordered, method='ward', metric='euclidean', cmap="ocean_r", annot=False, fmt=".2f")
+plt.title(f"Clustermap with Ordered Rows and Columns (Estimated Clusters: {n_ordered_clusters})", pad=20)
+
 
 # Estimate optimal number of clusters using the elbow method
 n_ordered_clusters = elbow_method(df_ordered.values)
