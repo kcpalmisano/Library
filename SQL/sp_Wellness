@@ -1,6 +1,9 @@
+
+
+
 USE [DATABASE]
 GO
-/****** Object:  StoredProcedure [Empire].[sp_Wellness_flags]   
+/****** Object:  StoredProcedure [SCHEMA].[sp_Wellness_flags]    Script Date: 7/3/2022 10:06:36 AM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8,16 +11,26 @@ GO
 /*
 	Author:		Casey Palmisano
 	Notes:		This SP populates a table for flag creation of Wellness warnings and disenrollments
-	Updates:	9/8/22		Casey P. Updated for jobid table and errors table 
+	Updates:	
+	9/8/2022		Casey P. Updated for jobid table and errors table 
 	5/17/2023	Casey P. Updates for Eligibility 2.0 updates and 5Star updates
 	6/6/2023	Casey P. updated for registry list (next appt date)			** Further updates needed as list better populates
 	6/20/2023	Casey P. Updated for eligibility and exclusions as well as plan name 
 	6/23/2023	Casey P. Updated for attribution data with new table from Raph S. 
-
+	8/16/2023   	Casey P. Optimized and cleaned the flow 
+	8/24/2023	Casey P. Added additional logic to the attribution for NON FiveStar center exclusion lines 228-245
+    	8/28/2023	Casey P. Removed all aspects of attritution based logic 
+	8/30/2023	Casey P. Updated all warnings based on new information from Brenda P. and Nicole R. 
+	9/05/2023	Casey P. Updated NoUsage warning with new logic and commented out WarnOutsideUsage until redirection by Directors
+	11/30/2023	Casey P. Updated and trimmed code  for optimized running and no longer testing 
+	2/05/2024	Casey P. Updated by removing DB name for AZURE migration
+	4/03/2024	Casey P. Updates for failsafe
+	05/23/2024  	Casey P. Updated table name from Flat_test to ClaimsData and updated Principle to Principal
+	6/14/2024	Casey P. Now Sunset due to python optimization and new process
 */
-ALTER procedure [Empire].[sp_Wellness_flags]
+ALTER PROCEDURE [SCHEMA].[sp_Wellness_flags]
 (
-       @JobDescription                   varchar(100)  = null,
+       @JobDescription                   varchar(100)  = 'Wellness Warnings Flags',
        @PeriodFrom                       date          = null,
        @PeriodTo                         date          = null,
        @FileName                         varchar(125)  = null,
@@ -34,7 +47,7 @@ begin try
        -- Declare and initialize variables.
        declare
               @DatetimeStamp                    datetime = getdate(),
-              @spName                           varchar(100) = 'Wellness Flags',
+              @spName                           varchar(100) = 'Wellness Warnings Flags',
               @JobId                            int,
               @NrRowsInserted                   int;
 
@@ -89,328 +102,221 @@ begin try
 
 /***************************************************************************************************************************************/
 
-	----BEGIN actual stored procedure 
-
-drop table if exists #fundstaxid;
-Select distinct  billingtaxid as fundstaxid, fp.funds_name 
-into #fundstaxid
-from Empire.ClaimsFlat_Test cd WITH (NOLOCK) 					
-left join [SERVER].[DATABASE].[d365].[funds_providerorganization] fp
-on fp.funds_fein = cd.BillingTaxId  ---matching funds_fein with billingTaxID
-where fp.funds_parentorganizationname is null 
-and funds_fivestar = 1 
-
----tax id for 5starcenters is in  [DATABASE].[d365].[funds_providerorganization] in [funds_fein]
-
-
---------------------------------- Primary Care 
-drop table if exists #tempID;
- -- pull specialty ids that have an attribution level of 1 (that is a primary care Per Brenda P.)
-select  HfSpecialtyId
-INTO #tempID
-from Main.HfSpecialtyId
-where AttributionLevel = 1;
-
-drop table if exists #HFID;
--- using the above specialty ids, add in the specialty code for CS90 and WGS
-select  sm.HfSpecialtyId, sm.SpecialtyCode 
-Into #HFID
-from main.specialtymap  sm
-Inner join #tempID  id
-on id.HfSpecialtyId = sm.HfSpecialtyId;
----------------------------------
-
-
+--------------------------------- Data 'Universe' Creation -------------------------------------
 Drop table if exists #WELLNESS;
---Set base data for table
-SELECT DISTINCT
-    a.person_id,
-    funds_facilityname,
-    funds_warningdate,
-    funds_warningreason,
-    ServiceStartDate,
-    BillingTaxId,
-    PlaceOfService,
-    fp.fundstaxid,
-    att.att_taxid,
-    fp.funds_name,
-    CAST(funds_dateactive AS DATE) AS funds_date_active,
-    funds_closedate,
-    rl.Last_Visit,
-    rl.Next_Appt,
-    CAST(NULL AS DATE) AS [date],                 -- add date column for tracking
-    CAST(NULL AS VARCHAR) AS [JobId]              -- add jobid column for tracking
-INTO #WELLNESS                                    -- drop into temp table for first part
-FROM
-    (
-        -- Get distinct columns from Empire.ClaimsData table
-        SELECT DISTINCT
-            PERSON_ID AS claim_personID,
-            PaidDate,
-            ServiceStartDate,
-            ServiceEndDate,
-            ClaimEntryDate,
-            HealthCardId,
-            RenderingName,
-            BillingNPI,
-            BillingName,
-            BillingTaxId,
-            GroupNr,
-            HfSpecialtyId,
-            PlaceOfService
-        FROM
-            Empire.ClaimsFlat_Test WITH (NOLOCK)
-        WHERE
-            ServiceStartDate >= '2019-01-01' -- GETDATE() - 1460) b -- 4 years ago?
-            AND PlaceOfService = '11' -- Filtering by PlaceOfService = '11' 
-    ) b
-LEFT JOIN
-    (
-        -- Get distinct columns from [DATABASE].d365.funds_enrollment table
-        SELECT DISTINCT
-            person_id,
-            funds_sourcename,
-            funds_dateactive,
-            funds_closedate,
-            funds_disease1name,
-            funds_facilityname,
-            funds_outreach,
-            funds_warningdate,
-            funds_warningreason
-        FROM
-            [DATABASE].d365.funds_enrollment WITH (NOLOCK)
-        WHERE
-            funds_programname = 'Wellness'
-            AND statuscodename = 'Participating'
-            AND statecodename = 'Active'
-    ) a ON a.person_id = b.claim_personID -- Get the members that are in Wellness, active, and participating
-LEFT JOIN
-    Wellness.Registry_List rl WITH (NOLOCK) ON rl.Person_Id = a.person_id
-LEFT JOIN 
-    ----see the member's most recent 5 star visit 
-    (SELECT DISTINCT
-        person_id AS fs_personid,
-        Billingtaxid AS att_taxid,
-        AttributionMonth,
-        AttributionYear  
-    FROM
-        empire.fivestarattribution WITH (NOLOCK) 
-    WHERE
-        AttributionYear = YEAR(GETDATE())   
-        AND AttributionMonth > MONTH(GETDATE()) - 2
-    ) att ON a.person_id = att.fs_personid
-left JOIN
-    #fundstaxid fp WITH (NOLOCK) ON fp.fundstaxid = b.BillingTaxId    --matching 5star tax ids
-INNER JOIN 
-    #HFID hfid WITH (NOLOCK) ON hfid.HfSpecialtyId = b.HfSpecialtyId    --matching Specialty code for primary care
-	where a.Person_ID is NOT NULL;
-	   
 
+WITH cte_elig AS (    -------------Eligibility----v
+    SELECT
+        person_id
+        ,MAX(STOP_DATE) AS recent_date
+    FROM SCHEMA.EligMedical WITH (NOLOCK)
+		WHERE GETDATE() BETWEEN START_DATE AND STOP_DATE
+		GROUP BY PERSON_ID
+),
+cte_elig_plan AS (
+	SELECT
+		ep.person_id
+		,CAST(ep.recent_date AS DATE) AS recent_date
+		,em.PLAN_DESCRIPTION AS plan_name
+	FROM cte_elig ep WITH (NOLOCK)
+	  LEFT JOIN SCHEMA.EligMedical em ON em.PERSON_ID = ep.PERSON_ID AND em.STOP_DATE = CAST(ep.recent_date AS DATE)
+		WHERE em.PLAN_DESCRIPTION IS NOT NULL
+			AND GETDATE() BETWEEN [START_DATE] AND STOP_DATE
+),
+cte_elgtemp AS (
+    SELECT
+        DISTINCT es.person_id
+		,CAST([start_date] AS DATE) AS [start_date]
+        ,CAST([stop_date] AS DATE) AS [stop_date]
+        ,ep.plan_name
+    FROM SCHEMA.vwEligMedicalSimple es WITH (NOLOCK)
+    LEFT JOIN cte_elig_plan ep WITH (NOLOCK) ON ep.person_id = es.person_id
+    WHERE es.stop_date > GETDATE()         --------^
+),
+cte_primary_care AS (
+    SELECT HfSpecialtyId
+      FROM SCHEMA.HfSpecialtyId
+		WHERE AttributionLevel = 1    --- 3, 41, 46, 48, 65, 74, 88, 130, 139
+),
+cte_primary_care_ids AS (
+    SELECT sm.HfSpecialtyId 
+			,sm.SpecialtyCode 
+	    FROM SCHEMA.specialtymap sm
+	 INNER JOIN cte_primary_care id ON id.HfSpecialtyId = sm.HfSpecialtyId
+)
+SELECT DISTINCT  -- Create the final result
+    a.person_id
+    ,ServiceStartDate
+    ,BillingTaxId
+    ,fp.funds_fein AS fundstaxid
+    ,fp.funds_location AS funds_name
+    ,funds_dateactive
+    ,et.[start_date]
+    ,et.[stop_date] 
+	,et.plan_name
+    ,rl.Last_Visit
+    ,rl.Next_Appt
+    ,CAST(NULL AS DATE) AS [date]         -- add date column for tracking
+    ,CAST(NULL AS VARCHAR) AS [JobId]      -- add jobid column for tracking
+INTO #WELLNESS                            
+ FROM (				    -- Get distinct columns from Claims table
+    SELECT DISTINCT 
+        CAST(PERSON_ID AS varchar) AS claim_personID
+        ,PaidDate
+        ,ServiceStartDate
+        ,ServiceEndDate
+        ,ClaimEntryDate
+        ,RenderingName
+		,Claimnr
+        ,CAST(BillingNPI AS INT) AS BillingNPI
+        ,BillingName
+        ,CAST(BillingTaxId AS INT) AS BillingTaxId
+        ,CAST(GroupNr AS INT) AS GroupNr
+        ,CAST(HfSpecialtyId AS INT) AS HfSpecialtyId
+    FROM SCHEMA.ClaimsData WITH (NOLOCK)
+		WHERE ServiceStartDate >= DATEADD(MONTH, -9, GETDATE())
+			AND (PlaceOfService = '11' OR PlaceOfService = '22')
+		) b
+INNER JOIN (
+    SELECT DISTINCT      -- Get distinct columns from [DbHfProd].d365.funds_enrollment table
+        CAST(person_id AS varchar) AS person_id
+        ,funds_sourcename
+        ,CAST(funds_dateactive AS DATE) AS funds_dateactive
+        ,CAST(funds_closedate AS DATE) AS funds_closedate
+        ,funds_facilityname
+		,funds_facility
+        ,funds_outreach
+        ,CAST(funds_warningdate AS DATE) AS funds_warningdate
+        ,funds_warningreason
+    FROM SCHEMA.funds_enrollment WITH (NOLOCK)
+    WHERE funds_program = 268300000			---wellness
+         AND statuscode = 268300305			---Participating 
+          AND statecode = 0				---Active
+		   AND (datediff(day, funds_dateactive, getdate()) > 180) ---check to make sure they have been in the program for AT LEAST 6 months 
+			)
+			a ON a.person_id = b.claim_personID
+ LEFT JOIN 
+	(SELECT Subscr_id,
+			CAST(Last_Visit AS DATE) AS Last_Visit
+			,CAST([Next_Appt] AS DATE) AS Next_Appt
+				FROM SCHEMA.Registry_List WITH (NOLOCK) 
+	) rl 
+		ON rl.Subscr_id = a.person_id
+ LEFT JOIN (
+    SELECT DISTINCT   -- Matching funds_fein for Tax ID comparison later
+        funds_fein
+		,funds_providerorganizationid
+        ,CASE WHEN funds_parentorganizationname IS NOT NULL 
+			THEN funds_parentorganizationname 
+				ELSE funds_name 
+					END AS funds_location
+    FROM [SCHEMA].[funds_providerorganization]
+		WHERE funds_fivestar = 1 
+			) fp  
+				ON a.funds_facility = fp.funds_providerorganizationid
+ inner JOIN cte_primary_care_ids hfid  -- Join with attribution level 1 
+	ON hfid.HfSpecialtyId = b.HfSpecialtyId
+ INNER JOIN cte_elgtemp et			 -- Join with cte_elgtemp
+	ON CAST(et.person_id as varchar) = a.person_id
+		WHERE a.Person_ID IS NOT NULL
+			and ServiceStartDate >= DATEADD(MONTH, -9, GETDATE());
 
----- Does the BillingTIN match the attribution TIN
-Drop table if exists #well; 
-Select *, 
-CASE WHEN BillingTaxId = att_taxid then 1 else 0 END AS TIN_match
+---------------------------------- Warning Flags ----------------------------------
+
+drop table if exists #well;
+
+SELECT 
+	person_id
+	,funds_name
+	,plan_name
+	,ServiceStartDate
+	,Next_Appt
+	,funds_dateactive
+	,[date]
+	,JobId
+	 ,CASE ---warnings in order of importance 
+         WHEN 
+              (w.BillingTaxId != w.fundstaxid AND w.fundstaxid IS NOT NULL)
+			  and FiveStar_Usage = 1
+			 -- and DATEDIFF(DAY, ServiceStartDate, GETDATE()) <= 30   -- CP 4/30/24 added to only be in the past thirty days
+        THEN 1 
+        ELSE 0							-- Checking BillingTaxId is NOT the same as the FundsTaxId, FundsTaxId is NOT NULL, claim was at a 5star location but not their assigned 5star
+		 END AS Warn_Switch				
+    ,CASE 
+        WHEN  
+             w.ServiceStartDate IS NULL 
+			AND Next_Appt is Null
+        THEN 1 
+        ELSE 0							-- the is no Scheduled appointment and no claim based visit (ServiceStartDate is NULL) 
+	    END AS Warn_ActiveNoApt		
+	,CASE 
+		WHEN 
+			( (Next_Appt is Null OR DATEDIFF(DAY, Next_Appt, GETDATE()) >= 1 )  --- CP 4/30/24 added in where NextApt is less than today
+			AND DATEDIFF( DAY, w.servicestartdate, GETDATE()) >= 270	
+             AND NOT EXISTS (
+                SELECT 1
+                FROM #WELLNESS wf2
+                WHERE wf2.person_id = w.person_id
+                       AND (wf2.BillingTaxId = wf2.fundstaxid) )
+	        )
+			THEN 1   
+			ELSE 0							-- Checking if funds_date_active and ServiceStartDate are both more than 270 days ago
+				END AS Warn_NoUsage
+				, FiveStar_Usage
 INTO #well
-from #WELLNESS
-
-
-Drop table if exists #well1; 
---create temp table with warning flags
-SELECT *	,						 
-	-- Six months outside 5-star usage = warning
-	-- Comparing tax ID and checking if funds are ended or if ServiceStartDate is not in the last 6 months
-CASE WHEN TIN_match = 0 
-        AND ((BillingTaxId != fundstaxid AND fundstaxid IS NOT NULL) OR fundstaxid IS NULL)
-        AND ServiceStartDate < GETDATE() - 180 
-    THEN 1 ELSE 0 END AS Warn_OutsideUsage
-	
-	-- Adding this for identifying claims that are in the correct 5-star location
-	-- Checking if BillingTaxId is different from fundstaxid
-	, CASE WHEN BillingTaxId != fundstaxid 
-		THEN 1 ELSE 0 END AS FiveStar_Usage
-	
-	-- Six months active without appointment = warning
-	-- Checking if funds_date_active is more than 180 days ago and ServiceStartDate is NULL
-	, CASE WHEN DATEDIFF(DAY, funds_date_active, GETDATE()) > 180 AND ServiceStartDate IS NULL 
-		THEN 1 ELSE 0 END AS Warn_ActiveNoApt
-	
-	-- Nine months without recent usage = warning
-	-- Checking if funds_date_active and ServiceStartDate are both more than 270 days ago
-	, CASE WHEN DATEDIFF(DAY, funds_date_active, GETDATE()) > 270 AND DATEDIFF(DAY, ServiceStartDate, GETDATE()) > 270 
-		THEN 1 ELSE 0 END AS Warn_NoUsage
-	
-	-- Warning to have member switch back
-	-- Checking if att_taxid is different from fundstaxid, funds are not closed, and ServiceStartDate is more than 180 days ago
-	, CASE WHEN TIN_match = 0 AND BillingTaxId = fundstaxid  AND DATEDIFF(DAY, ServiceStartDate, GETDATE()) > 180
-		THEN 1 ELSE 0 END AS Warn_Switch
-INTO #well1
-FROM #well WITH (NOLOCK);
-
-
- Drop table if exists #well2; 
-
--- Create a temporary table with disenrollment flags
-SELECT *				
-	-- Nine months outside 5-star usage = disenrollment
-	-- Checking if att_taxid is different from fundstaxid, funds_date_active is more than 270 days ago,
-	-- and Warn_OutsideUsage is equal to 1 (indicating warning for outside usage)
-	, CASE WHEN att_taxid != fundstaxid AND DATEDIFF(DAY, funds_date_active, GETDATE()) > 270
-		AND Warn_outsideusage = 1
-		THEN 1 ELSE 0 END AS DisEn_OutsideUsage
-	
-	-- Nine months active without appointment = disenrollment
-	-- Checking if funds_date_active is more than 270 days ago, ServiceStartDate is NULL,
-	-- and Warn_ActiveNoApt is equal to 1 (indicating warning for active without appointment)
-	, CASE WHEN DATEDIFF(DAY, funds_date_active, GETDATE()) > 270 AND ServiceStartDate IS NULL
-		AND Warn_ActiveNoApt = 1
-		THEN 1 ELSE 0 END AS DisEn_ActiveNoApt
-	
-	-- Twelve months without recent usage = disenrollment
-	-- Checking if funds_date_active and ServiceStartDate are both more than 365 days ago,
-	-- and Warn_ActiveNoApt is equal to 1 (indicating warning for active without appointment)
-	, CASE WHEN DATEDIFF(DAY, funds_date_active, GETDATE()) > 365 AND DATEDIFF(DAY, ServiceStartDate, GETDATE()) > 365
-		AND Warn_ActiveNoApt = 1
-		THEN 1 ELSE 0 END AS DisEn_NoUsage
-	
-INTO #well2
-FROM #well1 WITH (NOLOCK);
-
----------------------------------------------------------------------------  eligibility, plan names, exclusions 
-Drop Table if exists #elig;
----get the most recent stop date for the member
-select  person_id, max(STOP_DATE) as recent_date
- INTO #elig
-	from Main.EligMedical WITH (NOLOCK)
-	  Where STOP_DATE > '2019-01-01'
-	   group by PERSON_ID;
-
-
-
-Drop Table if exists #elig_plan;
----get the most recent plan for the member
-select ep.person_id, ep.recent_date, em.PLAN_DESCRIPTION as plan_name
- into #elig_plan
-	from #elig ep WITH (NOLOCK)
-	left join main.EligMedical em
-		on em.PERSON_ID = ep.PERSON_ID
-		and em.STOP_DATE = ep.recent_date
-   where em.PLAN_DESCRIPTION is NOT NULL   ---exclude any without plan names 
-  
-
-
-Drop table if exists #elgtemp;
-----get the timeframe for each member
-select distinct es.person_id, [start_date], [stop_date], ep.plan_name 
-	INTO #elgtemp
-	from vwELIGIBILITY_STANDARDIZED_GROUPED_SIMPLE es WITH (NOLOCK) 		
-		Left JOIN #elig_plan ep  WITH (NOLOCK) 
-		on ep.person_id = es.person_id
-		Where es.stop_date > '2019-01-01'
-		order by es.person_id;
-
-
-
-Drop table if exists #ervisits
-		----- One off ER visits
-SELECT cd1.person_id, cd1.Claimnr, cd1.servicestartdate
-	INTO #ervisits
-	 FROM Empire.ClaimsFlat_Test cd1 WITH (NOLOCK)
-		INNER JOIN Empire.ClaimsFlat_Test cd2 WITH (NOLOCK) 
-		  ON cd1.person_id = cd2.person_id
-			WHERE cd1.isER = 1
-			  AND (DATEDIFF(DAY, cd2.servicestartdate, cd1.servicestartdate) <= 90
-				AND cd2.servicestartdate <> cd1.servicestartdate 
-				or cd1.Claimnr <> cd2.Claimnr)
-			  AND cd2.DiagnosisCodePrinciple <> cd1.DiagnosisCodePrinciple
-			  AND cd1.ServiceStartDate > '2019-01-01'
-			GROUP BY cd1.person_id, cd1.Claimnr, cd1.servicestartdate
-			HAVING COUNT(*) < 2
-		ORDER BY cd1.person_id, cd1.Claimnr;
-
---Set up data for exclusions 
-Drop Table if exists #exclu_data;
-select distinct person_id, claimnr, servicestartdate, DiagnosisCodeAdmit, DiagnosisCodePrinciple, DiagnosisCode1, DiagnosisCode2
- into #exclu_data
-  from Empire.ClaimsFlat_Test WITH (NOLOCK)
-   where ServiceStartDate > '2019-01-01'
-
-
---exclusion table for flu shots, pre ops, covid tests, and cancer visits
-Drop table if exists #exclusions;
-
-SELECT  cd1.person_id, cd1.Claimnr
-	INTO #exclusions
-	 FROM #exclu_data cd1 WITH (NOLOCK)
-		  WHERE cd1.DiagnosisCodeAdmit in  ('Z23', 'Z0181', 'Z1152', 'C00', 'C01', 'C02', 'C03', 'C04', 'C05', 'C06', 'C07', 'C08', 'C09', 'C10', 'C11', 'C12', 'C13', 'C14', 'C15', 'C16', 'C17', 'C18', 'C19', 'C20', 'C21', 'C22', 'C23', 'C24', 'C25', 'C26', 'C30', 'C31', 'C32', 'C33', 'C34', 'C37', 'C38', 'C39', 'C40', 'C41', 'C43', 'C44', 'C45', 'C46', 'C47', 'C48', 'C49', 'C4A', 'C50', 'C51', 'C52', 'C53', 'C54', 'C55', 'C56', 'C57', 'C58', 'C60', 'C61', 'C62', 'C63', 'C64', 'C65', 'C66', 'C67', 'C68', 'C69', 'C70', 'C71', 'C72', 'C73', 'C74', 'C75', 'C76', 'C77', 'C78', 'C79', 'C7A', 'C7B', 'C80', 'C81', 'C82', 'C83', 'C84', 'C85', 'C86', 'C88', 'C90', 'C91', 'C92', 'C93', 'C94', 'C95', 'C96', 'D00', 'D01', 'D02', 'D03', 'D04', 'D05', 'D06', 'D07', 'D09', 'D10', 'D11', 'D12', 'D13', 'D14', 'D15', 'D16', 'D17', 'D18', 'D19', 'D20', 'D21', 'D22', 'D23', 'D24', 'D25', 'D26', 'D27', 'D28', 'D29', 'D30', 'D31', 'D32', 'D33', 'D34', 'D35', 'D36', 'D37', 'D38', 'D39', 'D3A', 'D40', 'D41', 'D42', 'D43', 'D44', 'D45', 'D46', 'D47', 'D48', 'D49', 'K317', 'K635', 'Q8500', 'Q8501', 'Q8502', 'Q8503', 'Q8509', 'B20', 'Z201') 
-				OR cd1.DiagnosisCodePrinciple in ('Z23', 'Z0181', 'Z1152', 'C00', 'C01', 'C02', 'C03', 'C04', 'C05', 'C06', 'C07', 'C08', 'C09', 'C10', 'C11', 'C12', 'C13', 'C14', 'C15', 'C16', 'C17', 'C18', 'C19', 'C20', 'C21', 'C22', 'C23', 'C24', 'C25', 'C26', 'C30', 'C31', 'C32', 'C33', 'C34', 'C37', 'C38', 'C39', 'C40', 'C41', 'C43', 'C44', 'C45', 'C46', 'C47', 'C48', 'C49', 'C4A', 'C50', 'C51', 'C52', 'C53', 'C54', 'C55', 'C56', 'C57', 'C58', 'C60', 'C61', 'C62', 'C63', 'C64', 'C65', 'C66', 'C67', 'C68', 'C69', 'C70', 'C71', 'C72', 'C73', 'C74', 'C75', 'C76', 'C77', 'C78', 'C79', 'C7A', 'C7B', 'C80', 'C81', 'C82', 'C83', 'C84', 'C85', 'C86', 'C88', 'C90', 'C91', 'C92', 'C93', 'C94', 'C95', 'C96', 'D00', 'D01', 'D02', 'D03', 'D04', 'D05', 'D06', 'D07', 'D09', 'D10', 'D11', 'D12', 'D13', 'D14', 'D15', 'D16', 'D17', 'D18', 'D19', 'D20', 'D21', 'D22', 'D23', 'D24', 'D25', 'D26', 'D27', 'D28', 'D29', 'D30', 'D31', 'D32', 'D33', 'D34', 'D35', 'D36', 'D37', 'D38', 'D39', 'D3A', 'D40', 'D41', 'D42', 'D43', 'D44', 'D45', 'D46', 'D47', 'D48', 'D49', 'K317', 'K635', 'Q8500', 'Q8501', 'Q8502', 'Q8503', 'Q8509', 'B20', 'Z201') 
-				OR cd1.DiagnosisCode1 in ('Z23', 'Z0181', 'Z1152', 'C00', 'C01', 'C02', 'C03', 'C04', 'C05', 'C06', 'C07', 'C08', 'C09', 'C10', 'C11', 'C12', 'C13', 'C14', 'C15', 'C16', 'C17', 'C18', 'C19', 'C20', 'C21', 'C22', 'C23', 'C24', 'C25', 'C26', 'C30', 'C31', 'C32', 'C33', 'C34', 'C37', 'C38', 'C39', 'C40', 'C41', 'C43', 'C44', 'C45', 'C46', 'C47', 'C48', 'C49', 'C4A', 'C50', 'C51', 'C52', 'C53', 'C54', 'C55', 'C56', 'C57', 'C58', 'C60', 'C61', 'C62', 'C63', 'C64', 'C65', 'C66', 'C67', 'C68', 'C69', 'C70', 'C71', 'C72', 'C73', 'C74', 'C75', 'C76', 'C77', 'C78', 'C79', 'C7A', 'C7B', 'C80', 'C81', 'C82', 'C83', 'C84', 'C85', 'C86', 'C88', 'C90', 'C91', 'C92', 'C93', 'C94', 'C95', 'C96', 'D00', 'D01', 'D02', 'D03', 'D04', 'D05', 'D06', 'D07', 'D09', 'D10', 'D11', 'D12', 'D13', 'D14', 'D15', 'D16', 'D17', 'D18', 'D19', 'D20', 'D21', 'D22', 'D23', 'D24', 'D25', 'D26', 'D27', 'D28', 'D29', 'D30', 'D31', 'D32', 'D33', 'D34', 'D35', 'D36', 'D37', 'D38', 'D39', 'D3A', 'D40', 'D41', 'D42', 'D43', 'D44', 'D45', 'D46', 'D47', 'D48', 'D49', 'K317', 'K635', 'Q8500', 'Q8501', 'Q8502', 'Q8503', 'Q8509', 'B20', 'Z201') 
-				OR cd1.DiagnosisCode2 in ('Z23', 'Z0181', 'Z1152', 'C00', 'C01', 'C02', 'C03', 'C04', 'C05', 'C06', 'C07', 'C08', 'C09', 'C10', 'C11', 'C12', 'C13', 'C14', 'C15', 'C16', 'C17', 'C18', 'C19', 'C20', 'C21', 'C22', 'C23', 'C24', 'C25', 'C26', 'C30', 'C31', 'C32', 'C33', 'C34', 'C37', 'C38', 'C39', 'C40', 'C41', 'C43', 'C44', 'C45', 'C46', 'C47', 'C48', 'C49', 'C4A', 'C50', 'C51', 'C52', 'C53', 'C54', 'C55', 'C56', 'C57', 'C58', 'C60', 'C61', 'C62', 'C63', 'C64', 'C65', 'C66', 'C67', 'C68', 'C69', 'C70', 'C71', 'C72', 'C73', 'C74', 'C75', 'C76', 'C77', 'C78', 'C79', 'C7A', 'C7B', 'C80', 'C81', 'C82', 'C83', 'C84', 'C85', 'C86', 'C88', 'C90', 'C91', 'C92', 'C93', 'C94', 'C95', 'C96', 'D00', 'D01', 'D02', 'D03', 'D04', 'D05', 'D06', 'D07', 'D09', 'D10', 'D11', 'D12', 'D13', 'D14', 'D15', 'D16', 'D17', 'D18', 'D19', 'D20', 'D21', 'D22', 'D23', 'D24', 'D25', 'D26', 'D27', 'D28', 'D29', 'D30', 'D31', 'D32', 'D33', 'D34', 'D35', 'D36', 'D37', 'D38', 'D39', 'D3A', 'D40', 'D41', 'D42', 'D43', 'D44', 'D45', 'D46', 'D47', 'D48', 'D49', 'K317', 'K635', 'Q8500', 'Q8501', 'Q8502', 'Q8503', 'Q8509', 'B20', 'Z201') 
+	FROM (
+		SELECT 
+		  CASE WHEN
+			 BillingTaxId IN (
+				SELECT DISTINCT fp.funds_fein 
+				FROM [SCHEMA].[funds_providerorganization] fp
+				WHERE fp.funds_fivestar = 1   ---establishes a flag that if the claim was at a fivestar facility
+			) THEN 1
+			ELSE 0
+		END AS  FiveStar_Usage 
+		,*
+		FROM #WELLNESS
+	     ) AS w
+		order by ServiceStartDate desc;
 		
-/*	--From STATA code (754-768)
-		flu shots =  Z23 icd10
-		pre op = Z0181
-		covid tests = Z1152
-		cancer related visits  = drop if diagnosis1_gen_10=="C00"	 | diagnosis1_gen_10=="C01"	 | diagnosis1_gen_10=="C02"	 | diagnosis1_gen_10=="C03"	 | diagnosis1_gen_10=="C04"	 | diagnosis1_gen_10=="C05"	 | diagnosis1_gen_10=="C06"	 | diagnosis1_gen_10=="C07"	 | diagnosis1_gen_10=="C08"	 | diagnosis1_gen_10=="C09"	 | diagnosis1_gen_10=="C10"	 | diagnosis1_gen_10=="C11"	 | diagnosis1_gen_10=="C12"	 | diagnosis1_gen_10=="C13"	 | diagnosis1_gen_10=="C14"	 | diagnosis1_gen_10=="C15"	 | diagnosis1_gen_10=="C16"	 | diagnosis1_gen_10=="C17"	 | diagnosis1_gen_10=="C18"	 | diagnosis1_gen_10=="C19"	 | diagnosis1_gen_10=="C20"	 | diagnosis1_gen_10=="C21"	 | diagnosis1_gen_10=="C22"	 | diagnosis1_gen_10=="C23"	 | diagnosis1_gen_10=="C24"	 | diagnosis1_gen_10=="C25"	 | diagnosis1_gen_10=="C26"	 | diagnosis1_gen_10=="C30"	 | diagnosis1_gen_10=="C31"	 | diagnosis1_gen_10=="C32"	 | diagnosis1_gen_10=="C33"	 | diagnosis1_gen_10=="C34"	 | diagnosis1_gen_10=="C37"	 | diagnosis1_gen_10=="C38"	 | diagnosis1_gen_10=="C39"	 | diagnosis1_gen_10=="C40"	 | diagnosis1_gen_10=="C41"	 | diagnosis1_gen_10=="C43"	 | diagnosis1_gen_10=="C44"	 | diagnosis1_gen_10=="C45"	 | diagnosis1_gen_10=="C46"	 | diagnosis1_gen_10=="C47"	 | diagnosis1_gen_10=="C48"	 | diagnosis1_gen_10=="C49"	 | diagnosis1_gen_10=="C4A"	 | diagnosis1_gen_10=="C50"	 | diagnosis1_gen_10=="C51"	 | diagnosis1_gen_10=="C52"	 | diagnosis1_gen_10=="C53"	 | diagnosis1_gen_10=="C54"	 | diagnosis1_gen_10=="C55"	 | diagnosis1_gen_10=="C56"	 | diagnosis1_gen_10=="C57"	 | diagnosis1_gen_10=="C58"	 | diagnosis1_gen_10=="C60"	 | diagnosis1_gen_10=="C61"	 | diagnosis1_gen_10=="C62"	 | diagnosis1_gen_10=="C63"	 | diagnosis1_gen_10=="C64"	 | diagnosis1_gen_10=="C65"	 | diagnosis1_gen_10=="C66"	 | diagnosis1_gen_10=="C67"	 | diagnosis1_gen_10=="C68"	 | diagnosis1_gen_10=="C69"	 | diagnosis1_gen_10=="C70"	 | diagnosis1_gen_10=="C71"	 | diagnosis1_gen_10=="C72"	 | diagnosis1_gen_10=="C73"	 | diagnosis1_gen_10=="C74"	 | diagnosis1_gen_10=="C75"	 | diagnosis1_gen_10=="C76"	 | diagnosis1_gen_10=="C77"	 | diagnosis1_gen_10=="C78"	 | diagnosis1_gen_10=="C79"	 | diagnosis1_gen_10=="C7A"	 | diagnosis1_gen_10=="C7B"	 | diagnosis1_gen_10=="C80"	 | diagnosis1_gen_10=="C81"	 | diagnosis1_gen_10=="C82"	 | diagnosis1_gen_10=="C83"	 | diagnosis1_gen_10=="C84"	 | diagnosis1_gen_10=="C85"	 | diagnosis1_gen_10=="C86"	 | diagnosis1_gen_10=="C88"	 | diagnosis1_gen_10=="C90"	 | diagnosis1_gen_10=="C91"	 | diagnosis1_gen_10=="C92"	 | diagnosis1_gen_10=="C93"	 | diagnosis1_gen_10=="C94"	 | diagnosis1_gen_10=="C95"	 | diagnosis1_gen_10=="C96"	
-		| diagnosis1_gen_10=="D00"	 | diagnosis1_gen_10=="D01"	 | diagnosis1_gen_10=="D02"	 | diagnosis1_gen_10=="D03"	 | diagnosis1_gen_10=="D04"	 | diagnosis1_gen_10=="D05"	 | diagnosis1_gen_10=="D06"	 | diagnosis1_gen_10=="D07"	 | diagnosis1_gen_10=="D09"	 | diagnosis1_gen_10=="D10"	 | diagnosis1_gen_10=="D11"	 | diagnosis1_gen_10=="D12"	 | diagnosis1_gen_10=="D13"	 | diagnosis1_gen_10=="D14"	 | diagnosis1_gen_10=="D15"	 | diagnosis1_gen_10=="D16"	 | diagnosis1_gen_10=="D17"	 | diagnosis1_gen_10=="D18"	 | diagnosis1_gen_10=="D19"	 | diagnosis1_gen_10=="D20"	 | diagnosis1_gen_10=="D21"	 | diagnosis1_gen_10=="D22"	 | diagnosis1_gen_10=="D23"	 | diagnosis1_gen_10=="D24"	 | diagnosis1_gen_10=="D25"	 | diagnosis1_gen_10=="D26"	 | diagnosis1_gen_10=="D27"	 | diagnosis1_gen_10=="D28"	 | diagnosis1_gen_10=="D29"	 | diagnosis1_gen_10=="D30"	 | diagnosis1_gen_10=="D31"	 | diagnosis1_gen_10=="D32"	 | diagnosis1_gen_10=="D33"	 | diagnosis1_gen_10=="D34"	 | diagnosis1_gen_10=="D35"	 | diagnosis1_gen_10=="D36"	 | diagnosis1_gen_10=="D37"	 | diagnosis1_gen_10=="D38"	 | diagnosis1_gen_10=="D39"	 | diagnosis1_gen_10=="D3A"	 | diagnosis1_gen_10=="D40"	 | diagnosis1_gen_10=="D41"	 | diagnosis1_gen_10=="D42"	 | diagnosis1_gen_10=="D43"	 | diagnosis1_gen_10=="D44"	 | diagnosis1_gen_10=="D45"	 | diagnosis1_gen_10=="D46"	 | diagnosis1_gen_10=="D47"	 | diagnosis1_gen_10=="D48"	 | diagnosis1_gen_10=="D49"
-	 icd10_1=="K317"	 | icd10_1=="K635"	 | icd10_1=="Q8500"	 | icd10_1=="Q8501"	 | icd10_1=="Q8502"	 | icd10_1=="Q8503"	 | icd10_1=="Q8509"	
-	 HIV/Aids = "B20" | icd10_1=="Z201")
-*/
 
------------------------------------------------------------------------------------------------------
+	
+Truncate table SCHEMA.[Wellness_flags];						  --clear table of previous data
 
---drop table [Empire].[Wellness_flags];	
-Truncate table [Empire].[Wellness_flags];						  --clear table of previous data
+INSERT INTO SCHEMA.[Wellness_flags]		  --put information from #well2 and exclusion data into final table for use
 
-INSERT INTO [DATABASE].[Empire].[Wellness_flags]		  --put information from #well2 and exclusion data into final table for use
-	-----Optimized code
-SELECT distinct w.person_id,  e.[start_date], e.[stop_date], Warn_OutsideUsage, Warn_ActiveNoApt, Warn_NoUsage, Warn_Switch, 
-DisEn_OutsideUsage, DisEn_ActiveNoApt, DisEn_NoUsage, w.FiveStar_Usage, funds_warningdate, funds_warningreason, 
-funds_facilityname, funds_name, plan_name, ServiceStartDate, BillingTaxId as cd_Taxid, att_taxid, w.fundstaxid as funds_taxid, w.PlaceOfService, 
-funds_date_active,  [date] = GETDATE(), JobId -- = @JobId
-	--INTO [Empire].[Wellness_flags]
-	FROM #well2 w WITH (NOLOCK) 	
-		LEFT JOIN #elgtemp e  WITH (NOLOCK) 	
-			ON e.PERSON_ID = w.person_id 
-			WHERE EXISTS (
-							SELECT 1
-							FROM main.eligmedical e2 WITH (NOLOCK) 	
-								WHERE e2.person_id = w.person_id
-								AND e2.stop_date <= DATEADD(MONTH, -3, GETDATE())
-								AND e2.stop_date <= GETDATE()
-							)
-							  AND NOT EXISTS (
-											SELECT 1
-											FROM #ervisits erv WITH (NOLOCK) 	
-											  WHERE erv.person_id = w.person_id
-											 )
-								AND NOT EXISTS (
-											SELECT 1
-											FROM #exclusions exc WITH (NOLOCK) 	
-											  WHERE exc.person_id = w.person_id
-								   			)
-			ORDER BY person_id;
+SELECT distinct w.person_id,  
+	Warn_ActiveNoApt, 
+	Warn_NoUsage,
+	Warn_Switch, 
+	funds_name,  
+	funds_dateactive,  
+	plan_name, 
+	servicestartdate,
+	[date] = GETDATE(),
+	JobId =  @JobId
+		---INTO SCHEMA.Wellness_flags
+		FROM #well w  
+		  where (Warn_ActiveNoApt = 1 
+			 OR Warn_NoUsage = 1
+			 OR Warn_Switch = 1 );   
+
 
 /*************************************************************************************************************************/
 
-update Main.Jobs 
+update SCHEMA.Jobs 
 set JobEnd = getdate()
 where  JobId = @JobId;
 
--- -- Now that we have JobId, update raw records
---update [Empire].[Wellness_flags] set JobId = @JobId where JobId = 0;  
-
-
-----Confirm ClaimRaw records exist to proceed
--- select @NrRowsInserted = count(1) from [Empire].[Wellness_flags]
--- where JobId = @JobId;
 
 end TRY
 
 BEGIN CATCH  
-	EXEC main.SP_Db_errors
+	EXEC SCHEMA.SP_Db_errors
 
 END CATCH  
 
 
 END
+
+
