@@ -1,0 +1,15 @@
+This was a story of a girl...
+
+Is it not always about a girl? Okay so I had a then girlfriend, now finacee that I wanted to impress. 
+She enjoyed when I wrote her small poetry, (and this is before ChatGPT!!) so I thought it might be fun to take the "top" love songs and have AI help me write out something. 
+
+I thought a bi-directional LSTM would be a good way to do it to help with more meaning as it can provide a richer understanding of the context surrounding each word in a sequence.
+It adds layers to better determine context, grammatical function of a word, and nuanced sentiment. 
+
+I trained it on a very small data set of 'love' songs that were listed as being a "top love song" from various websites. The songs were modified for nonsense words and other oddities/slang. 
+("lil" , "ooooo", "ah", etc.) Later repeating words were removed as well ("Peaches", "Shivers", etc.)
+
+It produced moderately decent outputs but would often start repeating, so the repeating words were removed and attempts were made again. It worked and produced viable output
+but still requires significantly additional materials to effectively produce actionable outputs. When pushed through an type of interupreter (another form of AI designed to help write out 
+fully developed concepts) the output was quite reasonable and produced good results. 
+
