@@ -4,7 +4,7 @@ a1 = open(r' PATH \Lyrics\Love\AFranklin_SayaLittlePrayer.txt', encoding='utf8')
 a2 ...
 
 ###join everything together into one large string
-lyrics = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11 + a12 + a13 + a14 + a15 + a16 + a17 + a18 + a19 + a20 + a21  + a23 + a24 + a25 + a26 + a27 + a28 + a29 + a30 + a31 + a32 + a33 + a34 + a35 + a36 + a37 + a38 + a40 + a41 + a42 + a43 + a44 + a45 + a46 + a47 + a48 +  a49 + a50 + a51 + a52 + a53 + a54 + a55 + a56 + a57 + a58 + a59 + a60 + a61 + a62 + a63 + a64 + a65 + a66 + a67 + a68 + a69 + a70 + a71 + a72 + a73 + a74 + a75 + a76 + a77 + a78 + a79 
+lyrics = ''.join([a1 , a2 , a3 , a4 , a5 , a6 , a7 , a8 , a9 , a10 , a11 , a12 , a13 , a14 , a15 , a16 , a17 , a18 , a19 , a20 , a21  , a23 , a24 , a25 , a26 , a27 , a28 , a29 , a30 , a31 , a32 , a33 , a34 , a35 , a36 , a37 , a38 , a40 , a41 , a42 , a43 , a44 , a45 , a46 , a47 , a48 , a49 , a50 , a51 , a52, a53 , a54 , a55 ,a56 ,a57 , a58 , a59 , a60 , a61 , a62 , a63 , a64 , a65, a66 , a67 , a68 , a69 , a70 , a71 , a72 , a73 , a74 , a75 , a76 , a77 , a78 , a79])
 
 
 ###Wordcloud set-up
@@ -24,6 +24,15 @@ plt.show()
 ###Generating the corpus by splitting the text into lines
 corpus = lyrics.lower().split("\n")
 print(corpus[:10])
+
+#Random repeating word causing issues 
+unwanted_word = "handle"  # word  to remove
+
+# Remove the unwanted word from the corpus
+filtered_corpus = []
+for line in corpus:
+    filtered_line = " ".join([word for word in line.split() if word != unwanted_word])
+    filtered_corpus.append(filtered_line)
 
 ###Fitting a Tokenizer on the Corpus
 tokenizer = Tokenizer()
