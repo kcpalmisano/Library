@@ -383,17 +383,15 @@ print(f"Removed columns: {to_drop}")
 print("Reduced DataFrame shape:", df_reduced.shape)
 
 
-cor_matrix = df_reduced
-
 ## heatmap **Better**
 import seaborn as sns
 #from scipy.cluster.hierarchy import dendrogram, linkage
 
 # Select top x features based on importance
-top_features = os_data_X.columns[:50]
+top_features = df_reduced.columns[:50]
 
 # Calculate correlation matrix
-cor_matrix = os_data_X[top_features].corr().abs()
+cor_matrix = df_reduced[top_features].corr().abs()
 
 # Generate heatmap 
 fig, ax = plt.subplots(figsize=(25, 12))  # Adjust figure size as needed
