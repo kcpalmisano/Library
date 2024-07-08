@@ -534,7 +534,7 @@ columns1 = ['COLUMN1', 'COLUMN3']
 X=os_data_X[columns1]
 y=os_data_y['FLAG']
 
-############################# MODEL TESTING ##########################  
+##############  MODELS ##############!!!
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout
@@ -542,10 +542,30 @@ from tensorflow.keras.utils import to_categorical
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from xgboost import XGBClassifier
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import confusion_matrix
 from sklearn.tree import DecisionTreeClassifier
 
 # Define a function to evaluate models
 def evaluate_model(model, X_test, y_test):
+    '''
+ Evaluates a machine learning model on the test set using various performance metrics.
+
+ Args:
+     model (object): Trained machine learning model.
+     X_test (array-like): Features of the test set. Shape (n_samples, n_features).
+     y_test (array-like): True labels of the test set. Shape (n_samples,) or (n_samples, n_classes) for one-hot encoded labels.
+
+ Returns:
+     tuple: Contains the following evaluation metrics:
+         - accuracy (float): Accuracy of the model.
+         - precision (float): Precision of the model.
+         - recall (float): Recall of the model.
+         - f1 (float): F1 score of the model.
+         - cm (array): Confusion matrix of the model's predictions.
+
+ Example:
+     >>> accuracy, precision, recall, f1, cm = evaluate_model(rf_model, X_test, y_test)
+ '''
     y_pred = model.predict(X_test)
     if len(y_test.shape) > 1:  # For neural networks
         y_test = np.argmax(y_test, axis=1)
@@ -557,6 +577,26 @@ def evaluate_model(model, X_test, y_test):
     cm = confusion_matrix(y_test, y_pred)
     return accuracy, precision, recall, f1, cm
 
+def confu_matrix(y_test, y_pred):
+    '''
+    Args: 
+        y_test (array): 1 line of binary outcomes
+        y_pred (array): 1 line of of binary prediction outcomes
+        
+    Returns: 
+        Colored confusion matrix with numbers and legend
+    '''
+
+    cm = confusion_matrix(y_test, y_pred)
+
+    ###Visual 
+    plt.figure(figsize=(10, 7))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='ocean_r')
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    plt.title('Confusion Matrix')
+    plt.show()
+
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=56)
 
@@ -565,7 +605,7 @@ y_train = np.ravel(y_train)
 y_test = np.ravel(y_test)
 
 
-# Logistic Regression
+############# Logistic Regression
 log_reg = LogisticRegression(max_iter=1000)
 log_reg.fit(X_train, y_train)
 log_reg_results = evaluate_model(log_reg, X_test, y_test)
@@ -574,50 +614,68 @@ print("Logistic Regression Results:", log_reg_results)
 # Predict probabilities
 y_pred_prob = log_reg.predict_proba(X_test)[:, 1]
 
-buildROC(y_test, y_pred_prob)
+buildROC(y_test, y_pred_prob, 'Logistic Regression', 'b')
 
+y_pred_lg = log_reg.predict(X_test)
 
-# Random Forest
+confu_matrix(y_test, y_pred_lg)
+
+############ Random Forest
 rf = RandomForestClassifier(n_estimators=100, random_state=56)
 rf.fit(X_train, y_train)
 rf_results = evaluate_model(rf, X_test, y_test)
 print("Random Forest Results:", rf_results)
 
 # Predict probabilities
-y_pred_rf = rf.predict_proba(X_test)[:, 1]
+y_prob_rf = rf.predict_proba(X_test)[:, 1]
+buildROC(y_test, y_prob_rf, 'Random Forest', 'g')
 
-buildROC(y_test, y_pred_rf)
+y_pred_rf = rf.predict(X_test)
+
+confu_matrix(y_test, y_pred_rf)
 
 
-# XGBoost
+################ XGBoost
 xgb = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
 xgb.fit(X_train, y_train)
 xgb_results = evaluate_model(xgb, X_test, y_test)
 print("XGBoost Results:", xgb_results)
 
 y_pred_prob_xgb = xgb.predict_proba(X_test)[:, 1]
-buildROC(y_test, y_pred_prob_xgb)
+buildROC(y_test, y_pred_prob_xgb, 'XGBoost', 'm')
 
-# K-Nearest Neighbors
+y_pred_xgb = xgb.predict(X_test)
+
+confu_matrix(y_test, y_pred_xgb)
+
+################## K-Nearest Neighbors
 knn = KNeighborsClassifier(n_neighbors=5)
 knn.fit(X_train, y_train)
 knn_results = evaluate_model(knn, X_test, y_test)
 print("K-Nearest Neighbors Results:", knn_results)
 
 y_pred_prob_knn = knn.predict_proba(X_test)[:, 1]
-buildROC(y_test, y_pred_prob_knn)
+buildROC(y_test, y_pred_prob_knn, 'KNN', 'c')
 
-# Decision Tree
+y_pred_knn = knn.predict(X_test)
+
+confu_matrix(y_test, y_pred_knn)
+
+################# Decision Tree
 dt = DecisionTreeClassifier(random_state=56)
 dt.fit(X_train, y_train)
 dt_results = evaluate_model(dt, X_test, y_test)
 print("Decision Tree Results:", dt_results)
 
 y_pred_prob_dt = dt.predict_proba(X_test)[:, 1]
-buildROC(y_test, y_pred_prob_dt)
+buildROC(y_test, y_pred_prob_dt, 'Decision Tree', 'y')
+
+y_pred_dt = dt.predict(X_test)
+
+confu_matrix(y_test, y_pred_dt)
 
 
-# Neural Network
+############## Neural Network
 y_train_cat = to_categorical(y_train)
 y_test_cat = to_categorical(y_test)
 nn = Sequential()
@@ -642,10 +700,12 @@ if y_pred_prob_nn.shape[1] == 2:
 y_test_binary = np.argmax(y_test_cat, axis=1) if y_test_cat.shape[1] > 1 else y_test
 
 # Call buildROC with the true labels and predicted probabilities
-buildROC(y_test_binary, y_pred_prob_nn)
+buildROC(y_test_binary, y_pred_prob_nn, 'Neural Network', 'purple')
+
+confu_matrix(y_test, y_pred_prob_nn)
 
 
-# # Support Vector Classifier
+############ Support Vector Classifier
 # svc = SVC(probability=True)
 # svc.fit(X_train, y_train)
 # svc_results = evaluate_model(svc, X_test, y_test)
@@ -656,14 +716,18 @@ buildROC(y_test_binary, y_pred_prob_nn)
 
 
 
-# Gradient Boosting Classifier
-gbc = GradientBoostingClassifier(n_estimators=100, random_state=56)
+############### Gradient Boosting Classifier
+gbc = GradientBoostingClassifier(n_estimators=100, random_state=42)
 gbc.fit(X_train, y_train)
 gbc_results = evaluate_model(gbc, X_test, y_test)
-print("Gradient Boosting Classifier Results:", gbc_results)
+print("Gradient Boosting Classifier Results:", gbc_results, 'Gradient Boosting', 'orange')
 
 y_pred_prob_gbc = gbc.predict_proba(X_test)[:, 1]
-buildROC(y_test, y_pred_prob_gbc)
+buildROC(y_test, y_pred_prob_gbc, 'Gradient Boosting', 'orange')
+
+y_pred_gbc = gbc.predict(X_test)
+
+confu_matrix(y_test, y_pred_gbc)
 
 
 # Print confusion matrices
@@ -679,10 +743,10 @@ print("Confusion Matrix for Decision Tree:\n", dt_results[4])
 
 plot_combined_roc(y_test, [
     (y_pred_prob, 'Logistic Regression', 'b'),
-    (y_pred_rf, 'Random Forest', 'g'),
+    (y_prob_rf, 'Random Forest', 'g'),
+    ##(y_pred_prob_svc, 'SVC Model', 'lime'),
     (y_pred_prob_knn, 'KNN', 'c'),
     (y_pred_prob_xgb, 'XGBoost', 'm'),
-    ##(y_pred_prob_svc, 'SVC', 'lime'),
     (y_pred_prob_dt, 'Decision Tree', 'y'),  
     (y_pred_prob_nn, 'Neural Network', 'purple'),
     (y_pred_prob_gbc, 'Gradient Boosting', 'orange')
@@ -690,4 +754,5 @@ plot_combined_roc(y_test, [
 
              
 close_all_connections()      
+               
                           
