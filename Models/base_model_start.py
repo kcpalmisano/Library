@@ -608,7 +608,7 @@ y_pred_prob_knn = knn.predict_proba(X_test)[:, 1]
 buildROC(y_test, y_pred_prob_knn)
 
 # Decision Tree
-dt = DecisionTreeClassifier(random_state=42)
+dt = DecisionTreeClassifier(random_state=56)
 dt.fit(X_train, y_train)
 dt_results = evaluate_model(dt, X_test, y_test)
 print("Decision Tree Results:", dt_results)
@@ -657,7 +657,7 @@ buildROC(y_test_binary, y_pred_prob_nn)
 
 
 # Gradient Boosting Classifier
-gbc = GradientBoostingClassifier(n_estimators=100, random_state=42)
+gbc = GradientBoostingClassifier(n_estimators=100, random_state=56)
 gbc.fit(X_train, y_train)
 gbc_results = evaluate_model(gbc, X_test, y_test)
 print("Gradient Boosting Classifier Results:", gbc_results)
