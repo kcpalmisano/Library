@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Define the paths
 input_folder = 'C:/Users/PATH/Data/BC/'  # replace with the path to your input folder
 output_folder = 'C:/Users/PATH/Data/BCout/'  # replace with the path to your output folder
-image_filename = '20191120-081241-BarackObamaLongFormBirthCertificate-Cropped.jpg'  # replace with your image file name
+image_filename = 'BO_BC.jpg'  # replace with your image file name
 output_filename = 'ext_text_test.txt'
 
 # Construct the full paths
