@@ -1,0 +1,10 @@
+Text Extraction 
+
+Was assigned a task to approach various methods to pull accurate text from birth certificates. Used python coding to approach three ways:
+
+Adv_  This is an expanded version of the 'Simple_' that is not all in functions but is line-by-line. 
+
+OpenAI_  This was attempting to use a pull and request to OpenAI to read the text from the image. It has a built in timeout for various time when it will be overdone with requests. 
+
+Simple_ This is not actually 'simple', but is all done in functions. I do have various aspects of fine tuning in the functions and it is called with the if  __name__ == "__main__": function at the end. This worked 
+
