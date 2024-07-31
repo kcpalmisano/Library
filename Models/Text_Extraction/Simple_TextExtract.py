@@ -261,10 +261,10 @@ def main():
         # No command-line arguments provided, set default paths for testing
         args = parser.parse_args([
            'C:/Users/PATH/Data/BC/', #Directory
-          ##'C:/Users/PATH/Data/BC/20191120-081241-BarackObamaLongFormBirthCertificate-Cropped.jpg',
-          'C:/Users/PATH/Data/BCout/',
-          '--file_type', 'image'
-            , '--is_directory'  # Indicating it's a directory
+          ##'C:/Users/PATH/Data/BC/BO_BC.jpg',  #single image
+           'C:/Users/PATH/Data/BCout/',
+           '--file_type', 'image'
+            , '--is_directory'  # Indicating it is a directory
         ])
     else:
         args = parser.parse_args()
