@@ -1,0 +1,8 @@
+Decision Model 
+
+
+This was a task working with database architecture. We were able to group many of the fields accordingly, but were not provided with a data dictionary. This proved challenging for many reasons. Our team was 
+able to group many of the features accordingly but we had trouble with many that names made no sense and the little information we did have about them was limited. SO I used this relational clustering model 
+to see if I could group them accordingly and this model was able to do that accuractely and has helped us with architecture structure. I am able to take the whole data set or just a portion of the features
+to group accordinly. 
+
