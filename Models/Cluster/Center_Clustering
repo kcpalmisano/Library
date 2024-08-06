@@ -16,7 +16,11 @@ from sqlalchemy.orm import sessionmaker
 
 import matplotlib.pyplot as plt
 import geopandas as gpd
+from sklearn.mixture import GaussianMixture
 from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.cluster import DBSCAN
 from sklearn.metrics import davies_bouldin_score, calinski_harabasz_score
 
 def close_all_connections():
@@ -102,7 +106,7 @@ def haversine(lat1, lon1, lat2, lon2):
     distance = radius * c
 
     return distance
-###------------------------------------------------------ #!!!
+###------------------------------------------------------
 
 # connection to server -> SERVER   db -> DATABASE
 conn, con = connect_to_sql_server('SERVER', 'DATABASE')
@@ -115,7 +119,7 @@ session = Session()
 
 # SQL query to fetch data from the database
 manh_5stars = pd.read_sql("""
-    SELECT DISTINCT latitude, longitude, address1, address2, city, state, fs.five_star_name, practicename, Centername, ZipCode as zip
+    SELECT DISTINCT latitude, longitude, address1, address2, city, state, fs.five_star_name, practicename, Centername
     FROM dbo.FIVE_STAR_CENTERS fs
     LEFT JOIN main.FiveStarCenter fc ON fc.taxid = fs.prov_tax_id
     WHERE end_dte IS NULL
@@ -128,50 +132,39 @@ manh_5stars = pd.read_sql("""
     ORDER BY five_star_name, PracticeName
 """, con)
 
+numb_clus = len(manh_5stars)
+
 manh_5stars['cluster'] = manh_5stars.index
 
 
 # Define the cluster centers
-fivestar_fac = manh_5stars[['latitude', 'longitude', 'practicename', 'five_star_name', 'Centername', 'state', 'city', 'zip']].reset_index()
+fivestar_fac = manh_5stars[['latitude', 'longitude', 'practicename', 'five_star_name', 'Centername', 'state', 'city']].reset_index()
 fivestar_fac = fivestar_fac.rename(columns={'index': 'cluster'})
 lalo_fivestar = fivestar_fac.rename(columns={'index': 'cluster'})
 #lalo_fivestar.drop(['practicename', 'Centername'], axis=1, inplace=True)
-
-stat_5stars = pd.read_sql('''SELECT DISTINCT latitude, longitude, address1, address2, city, state, fs.five_star_name, practicename, Centername, ZipCode as zip
-FROM dbo.FIVE_STAR_CENTERS fs
-LEFT JOIN main.FiveStarCenter fc ON fc.taxid = fs.prov_tax_id
-WHERE end_dte IS NULL
-      AND (latitude IS NOT NULL OR longitude IS NOT NULL)
-        AND state = 'NY'
-        AND IsRecruitment = 1
-		and city LIKE '%staten%'
-    ORDER BY five_star_name, PracticeName
-    ''', con)
-
-stat_5stars['cluster'] = stat_5stars.index    
 
 
 # Fetch member information for clustering
 members = pd.read_sql("""
     SELECT DISTINCT Person_id, RELATION_CODE AS relation, LAST_NAME + ', ' + FIRST_NAME AS Name, 
-        BIRTH_DATE, sex, ADDRESS_1,  ADDRESS_2, city, state, zip, 
-        ADDRESS_LATITUDE AS latitude, ADDRESS_LONGITUDE AS longitude
-            FROM Main.EligMedical
-                WHERE STOP_DATE >= GETDATE()
-                AND state = 'NY'
-                AND ADDRESS_LATITUDE < 40.9
-                AND ADDRESS_LONGITUDE < -73.6
-                AND ADDRESS_LONGITUDE > -74.046
+    BIRTH_DATE, sex, ADDRESS_1,  ADDRESS_2, city, state, zip, 
+    ADDRESS_LATITUDE AS latitude, ADDRESS_LONGITUDE AS longitude
+    FROM Main.EligMedical
+    WHERE medical_hospital = 'Empire'
+        AND state = 'NY'
+        AND ADDRESS_LATITUDE < 40.9
+        AND ADDRESS_LONGITUDE < -73.6
+        AND ADDRESS_LONGITUDE > -74.046
 """, con)
 
 # Clean up DOB to age
 def age(birthdate):
-  if pd.isnull(birthdate):
-    return None
-  else:
-    today = date.today()
-    age = today.year - birthdate.year - ((today.month, today.day) < (birthdate.month, birthdate.day))
-    return age
+    if pd.isnull(birthdate):
+        return None
+    else:
+        today = date.today()
+        age = today.year - birthdate.year - ((today.month, today.day) < (birthdate.month, birthdate.day))
+        return age
 
 # Apply the function to calculate age from birthdate
 members['BIRTH_DATE'] = members['BIRTH_DATE'].apply(age)
@@ -192,76 +185,13 @@ members['address'] = members['ADDRESS_1'] + ' ' + members['ADDRESS_2'] + ' ' + m
 # Label encode columns for features
 label_encode_columns(members, ['sex', 'city', 'state'])
 
-#####  Staten island HOME #############
-staten = pd.read_sql('''
- SELECT DISTINCT Person_id, RELATION_CODE AS relation, LAST_NAME + ', ' + FIRST_NAME AS Name, 
-    BIRTH_DATE, sex, ADDRESS_1,  ADDRESS_2, city, state, zip, 
-    ADDRESS_LATITUDE AS latitude, ADDRESS_LONGITUDE AS longitude
-	    FROM Main.EligMedical
-        where city LIKE '%Staten%'
-        AND (ADDRESS_LATITUDE IS NOT NULL OR ADDRESS_LONGITUDE IS NOT NULL)
-        and STOP_DATE >= GETDATE()
-''', con) 
+###------------------------------------------------------
 
-# Apply the function to calculate age from birthdate
-staten['BIRTH_DATE'] = staten['BIRTH_DATE'].apply(age)
-
-# Rename the field
-staten = staten.rename(columns={'BIRTH_DATE': 'Patient_Age'})
-
-# Fill the missing values with an empty string
-staten['ADDRESS_1'] = staten['ADDRESS_1'].fillna('')
-staten['ADDRESS_2'] = staten['ADDRESS_2'].fillna('')
-staten['city'] = staten['city'].fillna('')
-staten['state'] = staten['state'].fillna('')
-staten['zip'] = staten['zip'].fillna('')
-
-# Combine address components into a single column
-staten['address'] = staten['ADDRESS_1'] + ' ' + staten['ADDRESS_2'] + ' ' + staten['city'] + ' ' + staten['state'] + ' ' + staten['zip']
-
-# Label encode columns for features
-label_encode_columns(staten, ['sex', 'city', 'state'])
-
-#####  Staten island WORK #############  
-wkstaten = pd.read_sql('''
-	 SELECT DISTINCT Person_id, RELATION_CODE AS relation, LAST_NAME + ', ' + FIRST_NAME AS Name, 
-    BIRTH_DATE, sex, ADDRESS_1,  ADDRESS_2, WORK_LOCATION_CITY as city, state, WORK_LOCATION_ZIP as zip, 
-    WORK_LOCATION_LATITUDE AS latitude, WORK_LOCATION_LONGITUDE AS longitude
-	    FROM Main.EligMedical
-        where WORK_LOCATION_CITY LIKE '%Staten%'
-        AND (WORK_LOCATION_LATITUDE IS NOT NULL OR WORK_LOCATION_LONGITUDE IS NOT NULL)
-        and STOP_DATE >= GETDATE()
-''', con) 
-
-# Apply the function to calculate age from birthdate
-wkstaten['BIRTH_DATE'] = wkstaten['BIRTH_DATE'].apply(age)
-
-# Rename the field
-wkstaten = wkstaten.rename(columns={'BIRTH_DATE': 'Patient_Age'})
-
-# Fill the missing values with an empty string
-wkstaten['ADDRESS_1'] = wkstaten['ADDRESS_1'].fillna('')
-wkstaten['ADDRESS_2'] = wkstaten['ADDRESS_2'].fillna('')
-wkstaten['city'] = wkstaten['city'].fillna('')
-wkstaten['state'] = wkstaten['state'].fillna('')
-wkstaten['zip'] = wkstaten['zip'].fillna('')
-
-# Combine address components into a single column
-wkstaten['address'] = wkstaten['ADDRESS_1'] + ' ' + wkstaten['ADDRESS_2'] + ' ' + wkstaten['city'] + ' ' + wkstaten['state'] + ' ' + wkstaten['zip']
-
-# Label encode columns for features
-label_encode_columns(wkstaten, ['sex', 'city', 'state'])
-
-###------------------------------------------------------ #!!!
-##  NYC
 # Load the dataset
-mis_lalo = pd.read_csv('C://PATH/Scheduled Code/addresses_with_lat_long.csv')
-
-#Filter those that DO NOT contain 'Staten'
-mis_lalo_nyc = mis_lalo[~mis_lalo['address'].str.contains('staten|STATEN|Staten')]
+mis_lalo = pd.read_csv('C://Users/PATH/addresses_with_lat_long.csv')
 
 # Merge latitude and longitude with member data
-addy = pd.merge(members, mis_lalo_nyc, on='Person_id', how='left')
+addy = pd.merge(members, mis_lalo, on='Person_id', how='left')
 
 # Fill missing lat/long values in the members dataframe
 addy['latitude_x'].fillna(addy['latitude_y'], inplace=True)
@@ -280,155 +210,677 @@ addy.drop(['Name', 'ADDRESS_1', 'ADDRESS_2', 'address'], axis=1, inplace=True)
 addy = addy.dropna().replace([np.inf, -np.inf], np.nan).dropna()
 
 
-##  Staten
-#Filter those that DO contain 'Staten'
-mis_lalo_stat = mis_lalo[mis_lalo['address'].str.contains('staten|STATEN|Staten')]
-
-# Merge latitude and longitude with member data
-stat_addy = pd.merge(staten, mis_lalo_stat, on='Person_id', how='left')
-
-# Fill missing lat/long values in the members dataframe
-stat_addy['latitude_x'].fillna(stat_addy['latitude_y'], inplace=True)
-stat_addy['longitude_x'].fillna(stat_addy['longitude_y'], inplace=True)
-
-# Drop unnecessary columns
-stat_addy.drop(['address_y', 'latitude_y', 'longitude_y'], axis=1, inplace=True)
-
-# Rename columns for clarity
-stat_addy = stat_addy.rename(columns={'address_x': 'address', 'latitude_x': 'latitude', 'longitude_x': 'longitude'})
-
-# Drop unnecessary columns
-stat_addy.drop(['Name', 'ADDRESS_1', 'ADDRESS_2', 'address'], axis=1, inplace=True)
-
-# Drop rows with NaN values and infinity values
-stat_addy = stat_addy.dropna().replace([np.inf, -np.inf], np.nan).dropna()
+# Initialize cluster centers
+init_centers = lalo_fivestar[['latitude', 'longitude']].values
 
 
 close_all_connections()
 
 # ==============================
 
+# Function to remove outliers using IQR
+def remove_outliers(data, threshold_factor=3.7):    
+    Q1 = data.quantile(0.25)
+    Q3 = data.quantile(0.75)
+    IQR = Q3 - Q1
+    lower_threshold = Q1 - threshold_factor * IQR
+    upper_threshold = Q3 + threshold_factor * IQR
+    outliers = (data < lower_threshold) | (data > upper_threshold)
+    return data[~outliers.any(axis=1)]
+
 # label encode columns
 label_encode_columns(lalo_fivestar, ['practicename', 'five_star_name', 'state', 'city', 'Centername'])
 
-# Initialize cluster centers
+# Perform clustering
 init_centers = lalo_fivestar[['latitude', 'longitude']].values
 num_clusters = len(fivestar_fac)
-stat_numb_clus = len(stat_5stars)
 
-#### ============================= 
-# Load zip code lists
-manh_zip = pd.read_excel('C:/PATH/NYC_zips.xlsx', sheet_name='Manhattan')
-bronx_zip = pd.read_excel('C:/PATH/NYC_zips.xlsx', sheet_name='Bronx')
-brk_quen_zip = pd.read_excel('C:/PATH/NYC_zips.xlsx', sheet_name='Brook-Queens')
+#Remove outliers from the dataset
+kaddy_no_outliers = remove_outliers(addy[['latitude', 'longitude']])
+
+# ==============================
+
+# Create barriers for the rivers
+
+jam_bay = [
+    [40.611965, -73.777989],
+    [40.609489, -73.795842],
+    [40.609228, -73.809746],
+    [40.604406, -73.826741],
+    [40.601017, -73.839100],
+    [40.594631, -73.850602],
+    [40.588634, -73.862446],
+    [40.582507, -73.873432],
+    [40.577292, -73.883560],
+    [40.575206, -73.893517],
+    [40.572207, -73.905190],
+    [40.569599, -73.917549],
+    [40.566078, -73.930424],
+    [40.561905, -73.943814],
+    [40.559991, -73.956114],
+    [40.561556, -73.952337],
+    [40.562860, -73.946844],
+    [40.564034, -73.942724],
+    [40.565468, -73.939291],
+    [40.566772, -73.935171],
+    [40.567685, -73.931223],
+    [40.568728, -73.927790],
+    [40.569902, -73.923498],
+    [40.570684, -73.919378],
+    [40.571336, -73.914400],
+    [40.571727, -73.909079],
+    [40.571988, -73.903929],
+    [40.572640, -73.899466],
+    [40.573683, -73.893458],
+    [40.574074, -73.887621],
+    [40.574074, -73.883845],
+    [40.575248, -73.880583],
+    [40.576682, -73.876978],
+    [40.578638, -73.873717],
+    [40.581115, -73.870112],
+    [40.582679, -73.866335]  
+    ]
+
+east_river = [
+    [40.700357, -74.003842],
+    [40.707514,	-73.985474],
+    [40.708425,	-73.976634],
+    [40.716493,	-73.970797],
+    [40.728478,	-73.967986],
+    [40.743111,	-73.966699],
+    [40.751044,	-73.962665],
+    [40.759561,	-73.95494],
+    [40.766842,	-73.948674],
+    [40.773603,	-73.942065],
+    [40.780752,	-73.941035],
+    [40.781662,	-73.923783],
+    [40.79024, 	-73.914428],
+    [40.792255,	-73.900867],
+    [40.785529,	-73.89106],
+    [40.793457,	-73.865569],
+    [40.801108, -73.835152],
+    [40.801887, -73.827942],
+    [40.802164,	-73.837416],
+    [40.805672,	-73.808405], 
+    [40.802797, -73.800219],
+    [40.800393, -73.791893],
+    [40.802017, -73.786228],
+    [40.695681, -74.012419],
+    [40.696852, -74.009415],
+    [40.698219, -74.007012],
+    [40.699390, -74.004780],
+    [40.700821, -74.002978],
+    [40.701993, -74.001433],
+    [40.703489, -74.000145],
+    [40.704530, -73.998429],
+    [40.705425, -73.996776],
+    [40.705913, -73.995811],
+    [40.706206, -73.994824],
+    [40.706580, -73.993794],
+    [40.706824, -73.992764],
+    [40.707084, -73.991712],
+    [40.707263, -73.990146],
+    [40.707475, -73.988858],
+    [40.707654, -73.987335],
+    [40.707832, -73.986176],
+    [40.707963, -73.984996],
+    [40.708109, -73.984009],
+    [40.708223, -73.982679],
+    [40.708239, -73.981606],
+    [40.708385, -73.980039],
+    [40.708369, -73.978881],
+    [40.708581, -73.977615],
+    [40.708906, -73.976563],
+    [40.709638, -73.975512],
+    [40.710126, -73.974589],
+    [40.710549, -73.973924],
+    [40.711313, -73.973366],
+    [40.712126, -73.972808],
+    [40.712712, -73.972400],
+    [40.713314, -73.972079],
+    [40.713899, -73.971671],
+    [40.714517, -73.971564],
+    [40.715184, -73.971285],
+    [40.715867, -73.970920],
+    [40.716664, -73.970534],
+    [40.717477, -73.970126],
+    [40.718323, -73.969761],
+    [40.718583, -73.969611],
+    [40.719364, -73.969439],
+    [40.720226, -73.968967],
+    [40.721088, -73.968602],
+    [40.721917, -73.968238],
+    [40.722763, -73.967808],
+    [40.723608, -73.967615],
+    [40.724389, -73.967379],
+    [40.725332, -73.967315],
+    [40.726405, -73.967079],
+    [40.727495, -73.966843],
+    [40.728568, -73.966650],
+    [40.729788, -73.966542],
+    [40.730585, -73.966607],
+    [40.731641, -73.966800],
+    [40.732552, -73.966950],
+    [40.733658, -73.967186],
+    [40.734633, -73.967251],
+    [40.735511, -73.967336],
+    [40.736470, -73.967465],
+    [40.737267, -73.967487],
+    [40.738178, -73.967508],
+    [40.739153, -73.967422],
+    [40.739934, -73.967229],
+    [40.740746, -73.967057],
+    [40.741202, -73.966886],
+    [40.741966, -73.966628],
+    [40.742762, -73.966328],
+    [40.743478, -73.966006],
+    [40.744095, -73.965727],
+    [40.744778, -73.965362],
+    [40.745542, -73.964847],
+    [40.746225, -73.964590],
+    [40.747152, -73.964075],
+    [40.747916, -73.963603],
+    [40.748631, -73.963302],
+    [40.749460, -73.962594],
+    [40.749915, -73.962959],
+    [40.750793, -73.962723],
+    [40.751508, -73.962251],
+    [40.752256, -73.961779],
+    [40.752841, -73.961285],
+    [40.753589, -73.960620],
+    [40.754402, -73.959912],
+    [40.755166, -73.959311],
+    [40.755881, -73.958710],
+    [40.756547, -73.958002],
+    [40.757392, -73.957466],
+    [40.758156, -73.956543],
+    [40.758839, -73.956050],
+    [40.759619, -73.955256],
+    [40.760481, -73.954698],
+    [40.761309, -73.953990],
+    [40.761781, -73.953453],
+    [40.762333, -73.952938],
+    [40.763000, -73.952187],
+    [40.763764, -73.951479],
+    [40.764300, -73.950685],
+    [40.764885, -73.950235],
+    [40.765438, -73.949720],
+    [40.765990, -73.949462],
+    [40.766624, -73.948818],
+    [40.767550, -73.948325],
+    [40.768412, -73.947703],
+    [40.769208, -73.946758],
+    [40.769825, -73.946072],
+    [40.770280, -73.945557],
+    [40.770849, -73.944870],
+    [40.771759, -73.943905],
+    [40.772442, -73.943068],
+    [40.772978, -73.942424],
+    [40.773774, -73.941909],
+    [40.774668, -73.940643],
+    [40.775448, -73.940064],
+    [40.776195, -73.939463],
+    [40.776927, -73.939034],
+    [40.777479, -73.938261],
+    [40.778308, -73.937854],
+    [40.779218, -73.937274],
+    [40.748322, -73.961307],
+    [40.748810, -73.960298],
+    [40.749460, -73.959182],
+    [40.750045, -73.958142],
+    [40.750809, -73.957176],
+    [40.751476, -73.956404],
+    [40.752142, -73.955674],
+    [40.752727, -73.954966],
+    [40.753313, -73.954387],
+    [40.754012, -73.953872],
+    [40.754597, -73.953421],
+    [40.755247, -73.952928],
+    [40.756255, -73.952134],
+    [40.756726, -73.951683],
+    [40.757311, -73.950889],
+    [40.757945, -73.950353],
+    [40.758725, -73.949687],
+    [40.759538, -73.949044],
+    [40.760302, -73.948336],
+    [40.760936, -73.947649],
+    [40.761683, -73.947070],
+    [40.762528, -73.946426],
+    [40.761602, -73.947177],
+    [40.762658, -73.946297],
+    [40.763276, -73.945954],
+    [40.764024, -73.945246],
+    [40.764316, -73.945010],
+    [40.764771, -73.944538],
+    [40.765389, -73.944001],
+    [40.766055, -73.943315],
+    [40.766689, -73.942757],
+    [40.767355, -73.942113],
+    [40.767989, -73.941426],
+    [40.768542, -73.940868],
+    [40.769078, -73.940182],
+    [40.769955, -73.939152],
+    [40.770459, -73.938315],
+    [40.771418, -73.938165],
+    [40.772344, -73.938637],
+    [40.773303, -73.938873],
+    [40.774392, -73.939173],
+    [40.775448, -73.939302],
+    [40.780103, -73.936470],
+    [40.779567, -73.937950],
+    [40.780006, -73.935397],
+    [40.779989, -73.934023],
+    [40.779794, -73.932757],
+    [40.779599, -73.931642],
+    [40.779421, -73.930697],
+    [40.779291, -73.929710],
+    [40.779388, -73.928745],
+    [40.779453, -73.927854],
+    [40.779583, -73.927039],
+    [40.780022, -73.926331],
+    [40.780444, -73.925687],
+    [40.780818, -73.925086],
+    [40.781159, -73.924571],
+    [40.781582, -73.923970],
+    [40.781972, -73.923370],
+    [40.782459, -73.922855],
+    [40.783174, -73.922018],
+    [40.783775, -73.921460],
+    [40.784311, -73.920795],
+    [40.784880, -73.920151],
+    [40.785416, -73.919615],
+    [40.786017, -73.918992],
+    [40.786765, -73.918241],
+    [40.787236, -73.917748],
+    [40.787788, -73.917147],
+    [40.788519, -73.916482],
+    [40.789039, -73.915838],
+    [40.789608, -73.915216],
+    [40.790290, -73.914508],
+    [40.790842, -73.913821],
+    [40.791427, -73.913156],
+    [40.792012, -73.912340],
+    [40.791443, -73.913134],
+    [40.792093, -73.912383],
+    [40.792629, -73.911418],
+    [40.793344, -73.910323],
+    [40.793702, -73.909444],
+    [40.794725, -73.908027],
+    [40.795115, -73.907040],
+    [40.795635, -73.906139],
+    [40.796089, -73.905410],
+    [40.796447, -73.904465],
+    [40.796804, -73.903393],
+    [40.797324, -73.902534],
+    [40.797616, -73.901762],
+    [40.797974, -73.900689],
+    [40.798234, -73.899530],
+    [40.798461, -73.898801],
+    [40.798818, -73.897556],
+    [40.799208, -73.896354],
+    [40.799501, -73.895282],
+    [40.799793, -73.894380],
+    [40.800150, -73.893093],
+    [40.800475, -73.891934],
+    [40.800703, -73.890775],
+    [40.800865, -73.889574],
+    [40.800995, -73.888329],
+    [40.800898, -73.887128],
+    [40.800800, -73.885969],
+    [40.800768, -73.884724],
+    [40.800670, -73.883437],
+    [40.800475, -73.882107],
+    [40.799858, -73.881034],
+    [40.799371, -73.879403],
+    [40.799013, -73.878030],
+    [40.798591, -73.876957],
+    [40.798364, -73.875498],
+    [40.798234, -73.873867],
+    [40.798006, -73.871978],
+    [40.797811, -73.870219],
+    [40.797681, -73.868545],
+    [40.797779, -73.867215],
+    [40.797974, -73.865370],
+    [40.797194, -73.863996],
+    [40.797421, -73.862408],
+    [40.797649, -73.860477],
+    [40.797779, -73.858675],
+    [40.797974, -73.856701],
+    [40.798299, -73.854941],
+    [40.798689, -73.853310],
+    [40.799143, -73.851851],
+    [40.799436, -73.850435],
+    [40.799826, -73.849233],
+    [40.799826, -73.847474],
+    [40.799988, -73.845671],
+    [40.800020, -73.844255],
+    [40.800118, -73.842410],
+    [40.800183, -73.841079],
+    [40.800183, -73.839449],
+    [40.800085, -73.838118],
+    [40.800150, -73.836702],
+    [40.800150, -73.835286],
+    [40.800215, -73.833741],
+    [40.800443, -73.832325],
+    [40.800703, -73.830737],
+    [40.801287, -73.829578],
+    [40.801970, -73.828377],
+    [40.802749, -73.826574],
+    [40.803009, -73.825287],
+    [40.803204, -73.824214],
+    [40.803237, -73.822712],
+    [40.803399, -73.821424],
+    [40.803431, -73.819793],
+    [40.803334, -73.817948],
+    [40.803172, -73.816575],
+    [40.802717, -73.815073],
+    [40.802684, -73.813184],
+    [40.802262, -73.811597],
+    [40.802262, -73.809751],
+    [40.802197, -73.808335],
+    [40.802067, -73.806919],
+    [40.801937, -73.805374],
+    [40.801905, -73.803743],
+    [40.801580, -73.801941],
+    [40.801255, -73.800052],
+    [40.800963, -73.798593],
+    [40.800865, -73.797048],
+    [40.800833, -73.795460],
+    [40.800410, -73.792843],
+    [40.800508, -73.791770],
+    [40.800898, -73.789710],
+    [40.801580, -73.787564],
+    [40.802165, -73.785719],
+    [40.802879, -73.784302],
+    [40.803659, -73.783101],
+    [40.804893, -73.781985],
+    [40.806875, -73.778766],
+    [40.810415, -73.778080],
+    [40.812787, -73.777007],
+    [40.815775, -73.775805],
+    [40.819705, -73.775076],
+    [40.822010, -73.774046],
+    [40.825063, -73.772672],
+    [40.827401, -73.772415],
+    [40.829999, -73.772114],
+    [40.833441, -73.770913],
+    [40.833441, -73.770913],
+    [40.838214, -73.766793],
+    [40.839837, -73.763360],
+    [40.841883, -73.761300],
+    [40.844090, -73.758768],
+    [40.846817, -73.756365],
+    [40.849901, -73.756622],
+    [40.854089, -73.756064],
+    [40.858763, -73.756107],
+    [40.862885, -73.754562] 
+    ]
+
+harlem_river = [
+    [40.784847, -73.938143],
+    [40.781499, -73.939029],
+    [40.783124, -73.939029],
+    [40.784424, -73.938600],
+    [40.785528, -73.937999],
+    [40.786568, -73.937313],
+    [40.787348, -73.936540],
+    [40.788388, -73.935853],
+    [40.789752, -73.934823],
+    [40.791052, -73.933536],
+    [40.792027, -73.932163],
+    [40.792612, -73.930789],
+    [40.793651, -73.929845],
+    [40.794366, -73.928987],
+    [40.795211, -73.928729],
+    [40.796023, -73.928343],
+    [40.796933, -73.928343],
+    [40.797680, -73.928343],
+    [40.798752, -73.928214],
+    [40.799662, -73.928214],
+    [40.800929, -73.928043],
+    [40.801773, -73.928172],
+    [40.802683, -73.928429],
+    [40.803950, -73.929373],
+    [40.804664, -73.929931],
+    [40.805899, -73.930832],
+    [40.806613, -73.931562],
+    [40.807361, -73.932377],
+    [40.808627, -73.933193],
+    [40.809472, -73.933579],
+    [40.810511, -73.933536],
+    [40.811681, -73.933665],
+    [40.812558, -73.933536],
+    [40.813792, -73.933321],
+    [40.814766, -73.933236],
+    [40.815741, -73.933236],
+    [40.816553, -73.933150],
+    [40.817365, -73.933279],
+    [40.817982, -73.933279],
+    [40.818956, -73.933279],
+    [40.819898, -73.933364],
+    [40.820645, -73.933407],
+    [40.822106, -73.933450],
+    [40.822853, -73.933450],
+    [40.823763, -73.933536],
+    [40.824802, -73.933622],
+    [40.826068, -73.933708],
+    [40.826783, -73.933793],
+    [40.827789, -73.933922],
+    [40.829121, -73.934051],
+    [40.829835, -73.934051],
+    [40.831037, -73.934351],
+    [40.833537, -73.934394],
+    [40.834316, -73.934308],
+    [40.835615, -73.934051],
+    [40.836362, -73.933665],
+    [40.837044, -73.933193],
+    [40.837790, -73.932764],
+    [40.838667, -73.932249],
+    [40.839479, -73.931648],
+    [40.840388, -73.931347],
+    [40.841329, -73.930875],
+    [40.842108, -73.930489],
+    [40.843537, -73.929888],
+    [40.844284, -73.929588],
+    [40.845225, -73.928944],
+    [40.846134, -73.928386],
+    [40.847205, -73.927442],
+    [40.847985, -73.927099],
+    [40.848829, -73.926541],
+    [40.849802, -73.925768],
+    [40.850679, -73.925210],
+    [40.851620, -73.924524],
+    [40.852399, -73.923966],
+    [40.853114, -73.923451],
+    [40.854022, -73.922936],
+    [40.854834, -73.922249],
+    [40.855580, -73.921563],
+    [40.856522, -73.920876],
+    [40.857398, -73.920061],
+    [40.858275, -73.919331],
+    [40.859118, -73.918430],
+    [40.859962, -73.917614],
+    [40.860904, -73.917014],
+    [40.861553, -73.916327],
+    [40.862397, -73.915383],
+    [40.863240, -73.914911],
+    [40.863533, -73.914482],
+    [40.864182, -73.913838],
+    [40.864766, -73.913108],
+    [40.865480, -73.912507],
+    [40.866226, -73.911864],
+    [40.867200, -73.911435],
+    [40.866583, -73.911864],
+    [40.868401, -73.910791],
+    [40.869082, -73.910362],
+    [40.869926, -73.910233],
+    [40.870640, -73.910104],
+    [40.872100, -73.909847],
+    [40.873301, -73.910619],
+    [40.873853, -73.911435],
+    [40.874307, -73.912550],
+    [40.874404, -73.913495],
+    [40.875118, -73.914653],
+    [40.875183, -73.915512],
+    [40.875216, -73.916627],
+    [40.875216, -73.917700],
+    [40.875475, -73.918902],
+    [40.875865, -73.919975],
+    [40.876384, -73.920919],
+    [40.876968, -73.921563],
+    [40.877552, -73.922292],
+    [40.877811, -73.923580],
+    [40.877844, -73.924824]
+]
 
 
-# Check and convert zip codes in 'members' to strings
-if not pd.api.types.is_string_dtype(addy['zip']):
-    addy['zip'] = addy['zip'].astype(str)
-
-# Check and convert zip codes in 'manh_zip' to strings
-if not pd.api.types.is_string_dtype(manh_zip['Zip']):
-    manh_zip['Zip'] = manh_zip['Zip'].astype(str)
-    
-# Check and convert zip codes in 'bronx_zip' to strings
-if not pd.api.types.is_string_dtype(bronx_zip['Zip']):
-    bronx_zip['Zip'] = bronx_zip['Zip'].astype(str)
-        
-# Check and convert zip codes in 'brk_quen_zip' to strings
-if not pd.api.types.is_string_dtype(brk_quen_zip['Zip']):
-    brk_quen_zip['Zip'] = brk_quen_zip['Zip'].astype(str)
-    
-# Check and convert zip codes in 'brk_quen_zip' to strings
-if not pd.api.types.is_string_dtype(lalo_fivestar['zip']):
-     lalo_fivestar['zip'] = lalo_fivestar['zip'].astype(str)   
-    
-
-# Make both zip codes lowercase for consistent matching
-addy['zip'] = addy['zip'].str.lower()
-lalo_fivestar['zip'] = lalo_fivestar['zip'].str.lower()
-manh_zip['Zip'] = manh_zip['Zip'].str.lower()
-bronx_zip['Zip'] = bronx_zip['Zip'].str.lower()
-brk_quen_zip['Zip'] = brk_quen_zip['Zip'].str.lower()
-staten['zip'] = staten['zip'].str.lower()
-wkstaten['zip'] = wkstaten['zip'].str.lower()
+####view the river coordinates
+# Separate the coordinates into latitude and longitude lists
+latitude, longitude = zip(*jam_bay)
 
 
-# Handle empty zip codes by replacing with 'NA'
-addy['zip'] = addy['zip'].replace('', 'NA')
-lalo_fivestar['zip'] = lalo_fivestar['zip'].replace('', 'NA')
-manh_zip['Zip'] = manh_zip['Zip'].replace('', 'NA')
-bronx_zip['Zip'] = bronx_zip['Zip'].replace('', 'NA')
-brk_quen_zip['Zip'] = brk_quen_zip['Zip'].replace('', 'NA')
-staten['zip'] = staten['zip'].replace('', 'NA')
-wkstaten['zip'] = wkstaten['zip'].replace('', 'NA')
+# Create a scatter plot for the rivers
+plt.figure(figsize=(10, 6))
+plt.scatter(longitude, latitude, c='b', marker='*', label='Coordinates')
+plt.xlabel('Longitude')
+plt.ylabel('Latitude')
+plt.title('Latitude and Longitude Coordinates')
+plt.grid(True)
+plt.legend()
+plt.show()
 
 
-# Filter 'members' dataframe using the cleaned 'manh_zip' dataframe
-manhattan_members = addy[addy['zip'].isin(manh_zip['Zip'])]     #24594
-bronx_members = addy[addy['zip'].isin(bronx_zip['Zip'])]        #37277
-brk_queen_members = addy[addy['zip'].isin(brk_quen_zip['Zip'])] #74971
 
 
-manhattan_5star = lalo_fivestar[lalo_fivestar['zip'].isin(manh_zip['Zip'])]
-bronx_5star = lalo_fivestar[lalo_fivestar['zip'].isin(bronx_zip['Zip'])]
-brk_queen_5star = lalo_fivestar[lalo_fivestar['zip'].isin(brk_quen_zip['Zip'])]
+###==============================  Testing Barriers
 
-# Initialize cluster centers
-m_centers = manhattan_5star[['latitude', 'longitude']].values
-b_centers = bronx_5star[['latitude', 'longitude']].values
-b_q_centers = brk_queen_5star[['latitude', 'longitude']].values
-staten_centers = stat_5stars[['latitude', 'longitude']].values
-
-
-#####################################  Manhattan  ##################################### #!!!
-
-# Function to remove outliers using IQR
-def remove_outliers(data, threshold_factor=1.3):    #1.3
-    Q1 = data.quantile(0.25)
-    Q3 = data.quantile(0.75)
-    IQR = Q3 - Q1
-    lower_threshold = Q1 - threshold_factor * IQR
-    upper_threshold = Q3 + threshold_factor * IQR
-    outliers = (data < lower_threshold) | (data > upper_threshold)
-    return data[~outliers.any(axis=1)]
-
-manh_noouts = remove_outliers(manhattan_members[['latitude', 'longitude']])
-
-
-###---------------------Neighbors 
+from math import radians, sin, cos, sqrt, atan2
 from scipy.spatial.distance import cdist
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
 
-# Ch# Calculate distances between data points and init_centers
-distances = cdist(manh_noouts[['latitude', 'longitude']], m_centers)
+# Function to calculate distance between two points in kilometers
+def calculate_distance(point1, point2):
+    # Convert latitude and longitude from degrees to radians
+    lat1, lon1 = radians(point1[0]), radians(point1[1])
+    lat2, lon2 = radians(point2[0]), radians(point2[1])
+
+    # Radius of the Earth in kilometers
+    earth_radius = 6371.0
+
+    # Haversine formula
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+
+    a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+
+    distance = earth_radius * c
+    return distance
+
+# Function to calculate distance to nearest river
+def calculate_distance_to_nearest_river(point, rivers):
+    # Initialize the minimum distance to a large value
+    min_distance = float('inf')
+    nearest_river_point = None
+
+    # Iterate through the river lists
+    for river in river_coordinates:
+        # Iterate through the river points and find the closest point
+        for river_point in river:
+            distance = calculate_distance(point, river_point)
+            if distance < min_distance:
+                min_distance = distance
+                nearest_river_point = river_point
+
+    # Check if a nearest river point was found
+    if nearest_river_point is None:
+        return float('inf')
+    else:
+        return min_distance
+
+# Function to calculate custom distance
+def custom_distance(point, centroid, river_distance_weight, river_coordinates, river_threshold):
+    # Calculate the distance to the centroid
+    centroid_distance = calculate_distance(point, centroid)
+
+    # Calculate the distance to the nearest river
+    river_distance = calculate_distance_to_nearest_river(point, river_coordinates)
+
+    # Apply a penalty based on river proximity
+    if river_distance < river_threshold:  # Adjust river_threshold to control the penalty range
+        river_penalty = river_distance_weight * (river_threshold - river_distance)
+    else:
+        river_penalty = 1000
+
+    # Combine the distances with the penalty
+    total_distance = centroid_distance + river_penalty
+    return total_distance
+
+# Define river coordinates
+river_coordinates = [jam_bay + harlem_river + east_river]
+
+# Define river distance weight and threshold
+river_distance_weight = 5.2
+river_threshold = 50
+
+# Calculate distances between data points and init_centers using the custom distance function
+distances = cdist(kaddy_no_outliers[['latitude', 'longitude']], init_centers,
+                    metric=lambda x, y: custom_distance(x, y, river_distance_weight, river_coordinates, river_threshold))
 
 # Assign each data point to the nearest centroid
 cluster_labels = np.argmin(distances, axis=1)
 
+##########################
+
+#see all values in a row
+d_value = distances[38447,]
+print(d_value)
+
+#see min value and column (cluster) associated with
+min_value = np.inf
+min_index = None
+
+for i in range(distances.shape[1]):
+    if distances[38447, i] < min_value:
+        min_value = distances[38447, i]
+        min_index = i
+
+print("Minimum value:", min_value)
+print("Minimum value index:", min_index)
+
+############
+
+#see the label for the cluster
+element_value = cluster_labels[38447]
+print(element_value)
+
+
 # Add the cluster labels to the dataframe
-manh_noouts['cluster'] = cluster_labels
+kaddy_no_outliers['cluster'] = cluster_labels
+
+
+e_value = kaddy_no_outliers.iloc[38447,]
+print(e_value)
+
+################################################
 
 # Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(manh_noouts['longitude'], manh_noouts['latitude'])
-gdf = gpd.GeoDataFrame(manh_noouts, geometry=geometry)
+geometry = gpd.points_from_xy(kaddy_no_outliers['longitude'], kaddy_no_outliers['latitude'])
+gdf = gpd.GeoDataFrame(kaddy_no_outliers, geometry=geometry)
 
 # Plot the GeoDataFrame with different colors for each cluster
 fig, ax = plt.subplots(figsize=(20, 15))
 gdf.plot(column='cluster', categorical=False, markersize=30, cmap='tab20', ax=ax)
 
 # Plot the cluster centers
-for center in m_centers:
+for center in init_centers:
     plt.scatter(center[1], center[0], c='black', marker='*', s=100)
 
-# Evaluate the clustering with scores
-silhouettem = silhouette_score(manh_noouts[['latitude', 'longitude']], cluster_labels)
-davies_bouldin = davies_bouldin_score(manh_noouts[['latitude', 'longitude']], cluster_labels)
-calinski_harabasz = calinski_harabasz_score(manh_noouts[['latitude', 'longitude']], cluster_labels)
-
 # Set plot labels and aspect ratio
-plt.title(f'Manhattan Home 5-Stars, Sil:{silhouettem:.4f}')
+plt.title('Clustering Around Pre-defined Centroids with River Proximity')
 plt.xlabel('Longitude')
 plt.ylabel('Latitude')
 plt.gca().set_aspect('equal')
@@ -437,332 +889,45 @@ plt.gca().set_aspect('equal')
 plt.tight_layout()
 plt.show()
 
-print(f'Silhouette Score Mnh: {silhouettem:.4f}')
-print(f'Davies-Bouldin Score Mnh: {davies_bouldin:.4f}')
-print(f'Calinski-Harabasz Score Mnh: {calinski_harabasz:.4f}')
-
-
-#####################################  Bronx  #####################################
-
-# Function to remove outliers using IQR
-def remove_outliers(data, threshold_factor=1.2):    
-    Q1 = data.quantile(0.25)
-    Q3 = data.quantile(0.75)
-    IQR = Q3 - Q1
-    lower_threshold = Q1 - threshold_factor * IQR
-    upper_threshold = Q3 + threshold_factor * IQR
-    outliers = (data < lower_threshold) | (data > upper_threshold)
-    return data[~outliers.any(axis=1)]
-
-bronx_noouts = remove_outliers(bronx_members[['latitude', 'longitude']])
-
-###---------------------Neighbors 
-from scipy.spatial.distance import cdist
-import numpy as np
-
-#### Calculate distances between data points and init_centers
-distances = cdist(bronx_noouts[['latitude', 'longitude']], b_centers)
-
-# Assign each data point to the nearest centroid
-cluster_labels = np.argmin(distances, axis=1)
-
-# Add the cluster labels to the dataframe
-bronx_noouts['cluster'] = cluster_labels
-
-# Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(bronx_noouts['longitude'], bronx_noouts['latitude'])
-gdf = gpd.GeoDataFrame(bronx_noouts, geometry=geometry)
-
-# Plot the GeoDataFrame with different colors for each cluster
-fig, ax = plt.subplots(figsize=(20, 15))
-gdf.plot(column='cluster', categorical=False, markersize=30, cmap='tab20', ax=ax)
-
-# Plot the cluster centers
-for center in b_centers:
-    plt.scatter(center[1], center[0], c='black', marker='*', s=150)
-
 # Evaluate the clustering with scores
-silhouetteb = silhouette_score(bronx_noouts[['latitude', 'longitude']], cluster_labels)
-davies_bouldin = davies_bouldin_score(bronx_noouts[['latitude', 'longitude']], cluster_labels)
-calinski_harabasz = calinski_harabasz_score(bronx_noouts[['latitude', 'longitude']], cluster_labels)
+silhouette = silhouette_score(kaddy_no_outliers[['latitude', 'longitude']], cluster_labels)
+davies_bouldin = davies_bouldin_score(kaddy_no_outliers[['latitude', 'longitude']], cluster_labels)
+calinski_harabasz = calinski_harabasz_score(kaddy_no_outliers[['latitude', 'longitude']], cluster_labels)
 
-# Set plot labels and aspect ratio
-plt.title(f'Bronx Home 5-Stars, Sil:{silhouetteb:.4f}')
-plt.xlabel('Longitude')
-plt.ylabel('Latitude')
-plt.gca().set_aspect('equal')
-
-# Show the plot
-plt.tight_layout()
-plt.show()
-
-print(f'Silhouette Score Bx: {silhouetteb:.4f}')
-print(f'Davies-Bouldin Score Bx: {davies_bouldin:.4f}')
-print(f'Calinski-Harabasz Score Bx: {calinski_harabasz:.4f}')
-    
-
-#####################################  Brooklyn / Queens  #####################################
+print(f'Silhouette Score: {silhouette:.4f}')
+print(f'Davies-Bouldin Score: {davies_bouldin:.4f}')
+print(f'Calinski-Harabasz Score: {calinski_harabasz:.4f}')
 
 
-# Function to remove outliers using IQR
-def remove_outliers(data, threshold_factor=1.5):   
-    Q1 = data.quantile(0.25)
-    Q3 = data.quantile(0.75)
-    IQR = Q3 - Q1
-    lower_threshold = Q1 - threshold_factor * IQR
-    upper_threshold = Q3 + threshold_factor * IQR
-    outliers = (data < lower_threshold) | (data > upper_threshold)
-    return data[~outliers.any(axis=1)]
-
-b_q_noouts = remove_outliers(brk_queen_members[['latitude', 'longitude']])
-
-###---------------------Neighbors 
-from scipy.spatial.distance import cdist
-import numpy as np
-
-# Ch# Calculate distances between data points and init_centers
-distances = cdist(b_q_noouts[['latitude', 'longitude']], b_q_centers)
-
-# Assign each data point to the nearest centroid
-cluster_labels = np.argmin(distances, axis=1)
-
-# Add the cluster labels to the dataframe
-b_q_noouts['cluster'] = cluster_labels
-
-# Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(b_q_noouts['longitude'], b_q_noouts['latitude'])
-gdf = gpd.GeoDataFrame(b_q_noouts, geometry=geometry)
-
-# Plot the GeoDataFrame with different colors for each cluster
-fig, ax = plt.subplots(figsize=(20, 15))
-gdf.plot(column='cluster', categorical=False, markersize=30, cmap='tab20', ax=ax)
-
-# Plot the cluster centers
-for center in b_q_centers:
-    plt.scatter(center[1], center[0], c='black', marker='*', s=150)
-
-# Evaluate the clustering with scores
-silhouetteq = silhouette_score(b_q_noouts[['latitude', 'longitude']], cluster_labels)
-davies_bouldin = davies_bouldin_score(b_q_noouts[['latitude', 'longitude']], cluster_labels)
-calinski_harabasz = calinski_harabasz_score(b_q_noouts[['latitude', 'longitude']], cluster_labels)
-
-# Set plot labels and aspect ratio
-plt.title(f'Bronx Home 5-Stars, Sil:{silhouetteq:.4f}')
-plt.xlabel('Longitude')
-plt.ylabel('Latitude')
-plt.gca().set_aspect('equal')
-
-# Show the plot
-plt.tight_layout()
-plt.show()
-
-print(f'Silhouette Score BQ: {silhouetteq:.4f}')
-print(f'Davies-Bouldin Score BQ: {davies_bouldin:.4f}')
-print(f'Calinski-Harabasz Score BQ: {calinski_harabasz:.4f}')
 
 
-#####################################  Staten Island  #####################################
-
-# Function to remove outliers using IQR
-def remove_outliers(data, threshold_factor=1.4):   
-    Q1 = data.quantile(0.25)
-    Q3 = data.quantile(0.75)
-    IQR = Q3 - Q1
-    lower_threshold = Q1 - threshold_factor * IQR
-    upper_threshold = Q3 + threshold_factor * IQR
-    outliers = (data < lower_threshold) | (data > upper_threshold)
-    return data[~outliers.any(axis=1)]
-
-stat_noouts = remove_outliers(stat_addy[['latitude', 'longitude']])
-
-# Ch# Calculate distances between data points and init_centers
-statdistances = cdist(stat_noouts[['latitude', 'longitude']], staten_centers)
-
-# Assign each data point to the nearest centroid
-statcluster_labels = np.argmin(statdistances, axis=1)
-
-# Add the cluster labels to the dataframe
-stat_noouts['cluster'] = statcluster_labels
-
-# Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(stat_noouts['longitude'], stat_noouts['latitude'])
-gdf = gpd.GeoDataFrame(stat_noouts, geometry=geometry)
-
-# Plot the GeoDataFrame with different colors for each cluster
-fig, ax = plt.subplots(figsize=(20, 15))
-gdf.plot(column='cluster', categorical=False, markersize=50, cmap='tab20', ax=ax)
-
-# Plot the cluster centers
-for center in staten_centers:
-    plt.scatter(center[1], center[0], c='black', marker='*', s=150)
-
-# Evaluate the clustering with scores
-silhouettest = silhouette_score(stat_noouts[['latitude', 'longitude']], statcluster_labels)
-davies_bouldinst = davies_bouldin_score(stat_noouts[['latitude', 'longitude']], statcluster_labels)
-calinski_harabaszst = calinski_harabasz_score(stat_noouts[['latitude', 'longitude']], statcluster_labels)
-
-# Set plot labels and aspect ratio
-plt.title(f'Bronx Home 5-Stars, Sil:{silhouetteq:.4f}')
-plt.xlabel('Longitude')
-plt.ylabel('Latitude')
-plt.gca().set_aspect('equal')
-
-# Show the plot
-plt.tight_layout()
-plt.show()
-
-print(f'Silhouette Score BQ: {silhouettest:.4f}')
-print(f'Davies-Bouldin Score BQ: {davies_bouldinst:.4f}')
-print(f'Calinski-Harabasz Score BQ: {calinski_harabaszst:.4f}')
 
 
 ############################## Working Model 
 
-# # #---------------------Neighbors 
-# from scipy.spatial.distance import cdist
-# import numpy as np
+# #---------------------Neighbors 
+from scipy.spatial.distance import cdist
+import numpy as np
 
-# # Ch# Calculate distances between data points and init_centers
-# distances = cdist(kaddy_no_outliers[['latitude', 'longitude']], init_centers)
-
-# # Assign each data point to the nearest centroid
-# cluster_labels = np.argmin(distances, axis=1)
-
-# # Add the cluster labels to the dataframe
-# kaddy_no_outliers['cluster'] = cluster_labels
-
-# # Create a GeoDataFrame from the dataframe
-# geometry = gpd.points_from_xy(kaddy_no_outliers['longitude'], kaddy_no_outliers['latitude'])
-# gdf = gpd.GeoDataFrame(kaddy_no_outliers, geometry=geometry)
-
-# # Plot the GeoDataFrame with different colors for each cluster
-# fig, ax = plt.subplots(figsize=(20, 15))
-# gdf.plot(column='cluster', categorical=False, markersize=30, cmap='tab20', ax=ax)
-
-# # Plot the cluster centers
-# for center in init_centers:
-#     plt.scatter(center[1], center[0], c='black', marker='*', s=100)
-
-
-# # Set plot labels and aspect ratio
-# plt.title('Clustering Around Home 5-Stars')
-# plt.xlabel('Longitude')
-# plt.ylabel('Latitude')
-# plt.gca().set_aspect('equal')
-
-# # Show the plot
-# plt.tight_layout()
-# plt.show()
-
-# # Evaluate the clustering with scores
-# silhouette = silhouette_score(kaddy_no_outliers[['latitude', 'longitude']], cluster_labels)
-# davies_bouldin = davies_bouldin_score(kaddy_no_outliers[['latitude', 'longitude']], cluster_labels)
-# calinski_harabasz = calinski_harabasz_score(kaddy_no_outliers[['latitude', 'longitude']], cluster_labels)
-
-# print(f'Silhouette Score: {silhouette:.4f}')
-# print(f'Davies-Bouldin Score: {davies_bouldin:.4f}')
-# print(f'Calinski-Harabasz Score: {calinski_harabasz:.4f}')
-
-# #############--------------------------------------------------------------------------
-
-## Count clusters to see spread
-manh_cluster_counts = manh_noouts['cluster'].value_counts().sort_index()
-bronx_cluster_counts = bronx_noouts['cluster'].value_counts().sort_index()
-bq_cluster_counts = b_q_noouts['cluster'].value_counts().sort_index()
-stat_noouts_counts = stat_noouts['cluster'].value_counts().sort_index()
-
-print(manh_cluster_counts)
-print(bronx_cluster_counts)
-print(bq_cluster_counts)
-print(stat_noouts_counts)
-
-
-####Cluster change for right cluster number
-man_cluster = {0:8, 1:9, 2:10, 3:23, 4:29}
-manh_noouts['cluster'] = manh_noouts['cluster'].replace(man_cluster)
-
-bronx_cluster = {0:24, 1:25, 2:26, 3:27, 4:28}
-bronx_noouts['cluster'] = bronx_noouts['cluster'].replace(bronx_cluster)
-
-b_q_cluster = {8:11, 9:13, 10:14, 11:15, 12:16, 13:18, 14:19, 15:21, 16:22}
-b_q_noouts['cluster'] = b_q_noouts['cluster'].replace(b_q_cluster)
-
-staten_cluster = {0:30, 1:31}
-stat_noouts['cluster'] = stat_noouts['cluster'].replace(staten_cluster)
-stat_5stars['cluster'] = stat_5stars['cluster'].replace(staten_cluster)
-
-
-#join all  dataframes back into one
-home_members = pd.concat([manh_noouts, bronx_noouts, b_q_noouts, stat_noouts ])
-
-
-###make things pretty
-address = pd.merge(
-    addy[['Person_id', 'zip', 'latitude', 'longitude', 'relation']],
-    home_members[['latitude', 'longitude', 'cluster']],
-    on=['latitude', 'longitude'],
-    how='left'
-)
-
-stataddress = pd.merge(
-    stat_addy[['Person_id', 'zip', 'latitude', 'longitude', 'relation']],
-    home_members[['latitude', 'longitude', 'cluster']],
-    on=['latitude', 'longitude'],
-    how='left'
-)
-
-
-address = pd.merge(
-        address[['Person_id', 'zip', 'latitude', 'longitude', 'relation', 'cluster']],
-        manh_5stars[[ 'latitude', 'longitude', 'cluster', 'Centername', 'practicename']],
-        on=['cluster'],
-        how='left'
-        )
-
-stataddress = pd.merge(
-        stataddress[['Person_id', 'zip', 'latitude', 'longitude', 'relation', 'cluster']],
-        stat_5stars[[ 'latitude', 'longitude', 'cluster', 'Centername', 'practicename']],
-        on=['cluster'],
-        how='left'
-        )
-
-address_j = pd.concat([address, stataddress])
-
-address_no_dupes = address_j.drop_duplicates()
-
-#fix column names
-address_j = address_no_dupes.rename({'latitude_x':'latitude', 'latitude_y':'cluster_latitude', 'longitude_x': 'longitude', 'longitude_y': 'cluster_longitude'}, axis=1)
-
-#keep only non NAN rows
-address_no_nan = address_j.dropna(subset=['cluster'])
-
-#join all centroids into one array
-all_centers = np.concatenate((init_centers, staten_centers))
-
-###############################  Outlier Member clusters  #######################################
-
-#create a DF that has the missing (NAN) clusters from the home addresses
-nan_cluster_df = address_j[address_j['cluster'].isna()][['Person_id', 'latitude', 'longitude']]
-
-#### Calculate distances between data points and init_centers
-distances = cdist(nan_cluster_df[['latitude', 'longitude']], all_centers)
+# Ch# Calculate distances between data points and init_centers
+distances = cdist(kaddy_no_outliers[['latitude', 'longitude']], init_centers)
 
 # Assign each data point to the nearest centroid
 cluster_labels = np.argmin(distances, axis=1)
 
 # Add the cluster labels to the dataframe
-nan_cluster_df['cluster'] = cluster_labels
+kaddy_no_outliers['cluster'] = cluster_labels
 
 # Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(nan_cluster_df['longitude'], nan_cluster_df['latitude'])
-gdf = gpd.GeoDataFrame(nan_cluster_df, geometry=geometry)
+geometry = gpd.points_from_xy(kaddy_no_outliers['longitude'], kaddy_no_outliers['latitude'])
+gdf = gpd.GeoDataFrame(kaddy_no_outliers, geometry=geometry)
 
 # Plot the GeoDataFrame with different colors for each cluster
 fig, ax = plt.subplots(figsize=(20, 15))
 gdf.plot(column='cluster', categorical=False, markersize=30, cmap='tab20', ax=ax)
 
 # Plot the cluster centers
-for center in all_centers:
+for center in init_centers:
     plt.scatter(center[1], center[0], c='black', marker='*', s=100)
 
 
@@ -777,55 +942,41 @@ plt.tight_layout()
 plt.show()
 
 # Evaluate the clustering with scores
-silhouette_nan = silhouette_score(nan_cluster_df[['latitude', 'longitude']], cluster_labels)
-davies_bouldin_nan = davies_bouldin_score(nan_cluster_df[['latitude', 'longitude']], cluster_labels)
-calinski_harabasz_nan = calinski_harabasz_score(nan_cluster_df[['latitude', 'longitude']], cluster_labels)
+silhouette = silhouette_score(kaddy_no_outliers[['latitude', 'longitude']], cluster_labels)
+davies_bouldin = davies_bouldin_score(kaddy_no_outliers[['latitude', 'longitude']], cluster_labels)
+calinski_harabasz = calinski_harabasz_score(kaddy_no_outliers[['latitude', 'longitude']], cluster_labels)
 
-print(f'Silhouette Score nan: {silhouette_nan:.4f}')
-print(f'Davies-Bouldin Score nan: {davies_bouldin_nan:.4f}')
-print(f'Calinski-Harabasz Score nan: {calinski_harabasz_nan:.4f}')
+print(f'Silhouette Score: {silhouette:.4f}')
+print(f'Davies-Bouldin Score: {davies_bouldin:.4f}')
+print(f'Calinski-Harabasz Score: {calinski_harabasz:.4f}')
 
-###########################
+#############--------------------------------------------------------------------------
+
+cluster_counts = kaddy_no_outliers['cluster'].value_counts().sort_index()
+
+print(cluster_counts)
+
 
 ###make things pretty
-address_t = pd.merge(
+address = pd.merge(
     addy[['Person_id', 'zip', 'latitude', 'longitude', 'relation']],
-    nan_cluster_df[['latitude', 'longitude', 'cluster']],
+    kaddy_no_outliers[['latitude', 'longitude', 'cluster']],
     on=['latitude', 'longitude'],
-    how='right'
+    how='left'
+)
+
+address_no_dupes = address.drop_duplicates()
+
+
+address = pd.merge( 
+    address_no_dupes[['Person_id', 'zip', 'latitude', 'longitude', 'cluster', 'relation']], 
+    manh_5stars[['cluster', 'latitude', 'longitude', 'practicename']],
+    on= ['cluster'],
+    how= 'left'
     )
 
-
-stataddress_t = pd.merge(
-    stat_addy[['Person_id', 'zip', 'latitude', 'longitude', 'relation']],
-    nan_cluster_df[['latitude', 'longitude', 'cluster']],
-    on=['latitude', 'longitude'],
-    how='right'
-    )
-
-#put all 5start centers into one 
-all_5stars = pd.concat([manh_5stars, stat_5stars])
-
-
-address_tt = pd.merge(
-        address_t[['Person_id', 'zip', 'latitude', 'longitude', 'relation', 'cluster']],
-        all_5stars[[ 'latitude', 'longitude', 'cluster', 'Centername', 'practicename']],
-        on=['cluster'],
-        how='left'
-        )
-
-
-address_t_no_dupes = address_tt.drop_duplicates()
-
-address_t = address_t.rename({'latitude_x':'latitude', 'latitude_y':'cluster_latitude', 'longitude_x': 'longitude', 'longitude_y': 'cluster_longitude'}, axis=1)
-
-
-#join back the nan into original one
-address_hm_full = pd.concat([address_no_nan, address_t])
-
-address_hm_full = address_hm_full.drop_duplicates()
-
-
+# ##Rename columns for clarity
+address = address.rename(columns={'latitude_x': 'latitude', 'longitude_x': 'longitude', 'latitude_y':'cluster_latitude', 'longitude_y': 'cluster_longitude'})
 
 ####calculation for distance from centroid and averages
 def calculate_ratio_of_distances_above_threshold(df):
@@ -856,19 +1007,20 @@ def calculate_ratio_of_distances_above_threshold(df):
 
     return ratio
 
-
-result = calculate_ratio_of_distances_above_threshold(address_hm_full)
+# Example usage:
+# Assuming 'address' is your DataFrame
+result = calculate_ratio_of_distances_above_threshold(address)
 print(result)
 
 
-def add_average_distance_column(df):
-    for cluster in df['cluster'].unique():
-        if not pd.isna(cluster):
-            df.loc[df['cluster'] == cluster, 'average_distance_to_centroid'] = df.groupby('cluster')['distance_to_centroid'].mean()[cluster]
-            df.loc[df['cluster'] == cluster, 'cluster_stdev'] = df.groupby('cluster')['distance_to_centroid'].std()[cluster]
-    return df
 
-df = add_average_distance_column(address_hm_full.copy())
+def add_average_distance_column(df):
+  for cluster in df['cluster'].unique():
+    df.loc[df['cluster'] == cluster, 'average_distance_to_centroid'] = df.groupby('cluster')['distance_to_centroid'].mean()[cluster]
+    df.loc[df['cluster'] == cluster, 'cluster_stdev'] = df.groupby('cluster')['distance_to_centroid'].std()[cluster]
+  return df
+
+df = add_average_distance_column(address.copy())
 
 
 ################
@@ -893,43 +1045,21 @@ for cluster, group in grouped_df:
 # Print the results for each cluster
 for cluster, ratio in cluster_results.items():
     print(f"Cluster {cluster}: Ratio = {ratio}")
-  
-########################################################  Whole View of Home
-
-# Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(df['longitude'], df['latitude'])
-gdf = gpd.GeoDataFrame(df, geometry=geometry)
-
-# Plot the GeoDataFrame with different colors for each cluster
-fig, ax = plt.subplots(figsize=(20, 15))
-gdf.plot(column='cluster', categorical=False, markersize=50, cmap='tab20', ax=ax)
-
-# Plot the cluster centers
-for center in all_centers:
-    plt.scatter(center[1], center[0], c='black', marker='*', s=100)
+################    
 
 
-# Set plot labels and aspect ratio
-plt.title('Clustering Around Home 5-Stars')
-plt.xlabel('Longitude')
-plt.ylabel('Latitude')
-plt.gca().set_aspect('equal')
-
-# Show the plot
-plt.tight_layout()
-plt.show()
 
 
 
 # # #### save to csv
-# df.to_csv(r'C:\PATH\Data\clusters.csv', index=False)
+# df.to_csv(r'C:\Users\PATH\clusters.csv', index=False)
 
-#df.to_sql('Member_Fivestar1', con, schema='Temp', index=False, chunksize=1000, if_exists='replace')
+# address.to_sql('Member_Fivestar', con, schema='Temp', index=False, chunksize=1000, if_exists='replace')
 
 
 close_all_connections()
 #############---------------------------------------------------Work Addys
-#!!!
+
 # connection to server -> SERVER   db -> DATABASE
 conn, con = connect_to_sql_server('SERVER', 'DATABASE')
 cursor = conn.cursor()
@@ -943,15 +1073,14 @@ session = Session()
 # Fetch member information for clustering
 wk_members = pd.read_sql("""
     SELECT DISTINCT Person_id, RELATION_CODE AS relation, LAST_NAME + ', ' + FIRST_NAME AS Name,
-    BIRTH_DATE, sex, ADDRESS_1,  ADDRESS_2, WORK_LOCATION_CITY AS city, state, WORK_LOCATION_ZIP AS zip,
+    BIRTH_DATE, sex, ADDRESS_1,  ADDRESS_2, city, state, zip, 
     WORK_LOCATION_LATITUDE AS wk_latitude, WORK_LOCATION_LONGITUDE AS wk_longitude
     FROM Main.EligMedical
-    WHERE STOP_DATE >= GETDATE()
-       -- AND medical_hospital = 'HOSPITAL'
+    WHERE medical_hospital = 'Empire'
         AND state = 'NY'
-       -- AND WORK_LOCATION_LATITUDE < 40.9
-        --AND WORK_LOCATION_LONGITUDE < -73.6
-       -- AND WORK_LOCATION_LONGITUDE > -74.046
+        AND WORK_LOCATION_LATITUDE < 40.9
+        AND WORK_LOCATION_LONGITUDE < -73.6
+        AND WORK_LOCATION_LONGITUDE > -74.046
 """, con)
 
 # Clean up DOB to age
@@ -996,64 +1125,37 @@ close_all_connections()
 
 
 #Remove outliers from the dataset
-wk_no_outliers = remove_outliers(wk_addy[['wk_latitude', 'wk_longitude', 'zip']])
+wk_no_outliers = remove_outliers(wk_addy[['wk_latitude', 'wk_longitude']])
 
 ############################## Work Addresses 
 #---------------------Neighbors 
 from scipy.spatial.distance import cdist
 import numpy as np
 
-# Filter 'members' dataframe using the cleaned 'manh_zip' dataframe
-wk_manhattan_members = wk_no_outliers[wk_no_outliers['zip'].isin(manh_zip['Zip'])]     #25415
-wk_bronx_members = wk_no_outliers[wk_no_outliers['zip'].isin(bronx_zip['Zip'])]        #41276
-wk_brk_queen_members = wk_no_outliers[wk_no_outliers['zip'].isin(brk_quen_zip['Zip'])] #76625
-
-#####################################  Manhattan WK  #####################################
-
-# Function to remove outliers using IQR
-def remove_outliers(data, threshold_factor=3):    
-    Q1 = data.quantile(0.25)
-    Q3 = data.quantile(0.75)
-    IQR = Q3 - Q1
-    lower_threshold = Q1 - threshold_factor * IQR
-    upper_threshold = Q3 + threshold_factor * IQR
-    outliers = (data < lower_threshold) | (data > upper_threshold)
-    return data[~outliers.any(axis=1)]
-
-wkmanh_noouts = remove_outliers(wk_manhattan_members[['wk_latitude', 'wk_longitude']])
-
-wkmanh_noouts_fil = wkmanh_noouts[(wkmanh_noouts['wk_latitude'] >= 40.7) & (wkmanh_noouts['wk_longitude'] <= -73.91)]
-
-wkmanh_noouts = wkmanh_noouts_fil
-
-# # Calculate distances between data points and init_centers
-wk_distances = cdist(wkmanh_noouts[['wk_latitude', 'wk_longitude']], m_centers)
+# Ch# Calculate distances between data points and init_centers
+wk_distances = cdist(wk_no_outliers[['wk_latitude', 'wk_longitude']], init_centers)
 
 # Assign each data point to the nearest centroid
-cluster_labels = np.argmin(wk_distances, axis=1)
+wk_cluster_labels = np.argmin(wk_distances, axis=1)
 
 # Add the cluster labels to the dataframe
-wkmanh_noouts['cluster'] = cluster_labels
+wk_no_outliers['wk_cluster'] = wk_cluster_labels
 
 # Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(wkmanh_noouts['wk_longitude'], wkmanh_noouts['wk_latitude'])
-gdf = gpd.GeoDataFrame(wkmanh_noouts, geometry=geometry)
+wk_geometry = gpd.points_from_xy(wk_no_outliers['wk_longitude'], wk_no_outliers['wk_latitude'])
+wk_gdf = gpd.GeoDataFrame(wk_no_outliers, geometry=wk_geometry)
 
 # Plot the GeoDataFrame with different colors for each cluster
 fig, ax = plt.subplots(figsize=(20, 15))
-gdf.plot(column='cluster', categorical=False, markersize=30, cmap='tab20', ax=ax)
+wk_gdf.plot(column='wk_cluster', categorical=False, markersize=30, cmap='tab20', ax=ax)
 
 # Plot the cluster centers
-for center in m_centers:
+for center in init_centers:
     plt.scatter(center[1], center[0], c='black', marker='*', s=100)
 
-# Evaluate the clustering with scores
-silhouettemwk = silhouette_score(wkmanh_noouts[['wk_latitude', 'wk_longitude']], cluster_labels)
-davies_bouldinmwk = davies_bouldin_score(wkmanh_noouts[['wk_latitude', 'wk_longitude']], cluster_labels)
-calinski_harabaszmwk = calinski_harabasz_score(wkmanh_noouts[['wk_latitude', 'wk_longitude']], cluster_labels)
 
 # Set plot labels and aspect ratio
-plt.title(f'Manhattan Work 5-Stars, Sil:{silhouettemwk:.4f}')
+plt.title('Work Clustering Around 5-Stars')
 plt.xlabel('Longitude')
 plt.ylabel('Latitude')
 plt.gca().set_aspect('equal')
@@ -1062,326 +1164,48 @@ plt.gca().set_aspect('equal')
 plt.tight_layout()
 plt.show()
 
-print(f'Silhouette Score: {silhouettemwk:.4f}')
-print(f'Davies-Bouldin Score: {davies_bouldinmwk:.4f}')
-print(f'Calinski-Harabasz Score: {calinski_harabaszmwk:.4f}')
-
-
-#####################################  Bronx  #####################################
-
-# Function to remove outliers using IQR
-def remove_outliers(data, threshold_factor=1.5):    
-    Q1 = data.quantile(0.25)
-    Q3 = data.quantile(0.75)
-    IQR = Q3 - Q1
-    lower_threshold = Q1 - threshold_factor * IQR
-    upper_threshold = Q3 + threshold_factor * IQR
-    outliers = (data < lower_threshold) | (data > upper_threshold)
-    return data[~outliers.any(axis=1)]
-
-wkbronx_noouts = remove_outliers(wk_bronx_members[['wk_latitude', 'wk_longitude']])
-
-
-###---------------------Neighbors 
-from scipy.spatial.distance import cdist
-import numpy as np
-
-# Ch# Calculate distances between data points and init_centers
-distances = cdist(wkbronx_noouts[['wk_latitude', 'wk_longitude']], b_centers)
-
-# Assign each data point to the nearest centroid
-cluster_labels = np.argmin(distances, axis=1)
-
-# Add the cluster labels to the dataframe
-wkbronx_noouts['cluster'] = cluster_labels
-
-# Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(wkbronx_noouts['wk_longitude'], wkbronx_noouts['wk_latitude'])
-gdf = gpd.GeoDataFrame(wkbronx_noouts, geometry=geometry)
-
-# Plot the GeoDataFrame with different colors for each cluster
-fig, ax = plt.subplots(figsize=(20, 15))
-gdf.plot(column='cluster', categorical=False, markersize=30, cmap='tab20', ax=ax)
-
-# Plot the cluster centers
-for center in b_centers:
-    plt.scatter(center[1], center[0], c='black', marker='*', s=150)
-
 # Evaluate the clustering with scores
-silhouettebwk = silhouette_score(wkbronx_noouts[['wk_latitude', 'wk_longitude']], cluster_labels)
-davies_bouldinbwk = davies_bouldin_score(wkbronx_noouts[['wk_latitude', 'wk_longitude']], cluster_labels)
-calinski_harabaszbwk = calinski_harabasz_score(wkbronx_noouts[['wk_latitude', 'wk_longitude']], cluster_labels)
+wk_silhouette = silhouette_score(wk_no_outliers[['wk_latitude', 'wk_longitude']], wk_cluster_labels)
+wk_davies_bouldin = davies_bouldin_score(wk_no_outliers[['wk_latitude', 'wk_longitude']], wk_cluster_labels)
+wk_calinski_harabasz = calinski_harabasz_score(wk_no_outliers[['wk_latitude', 'wk_longitude']], wk_cluster_labels)
 
-# Set plot labels and aspect ratio
-plt.title(f'Bronx Home 5-Stars, Sil:{silhouetteb:.4f}')
-plt.xlabel('Longitude')
-plt.ylabel('Latitude')
-plt.gca().set_aspect('equal')
+print(f'Silhouette Score: {wk_silhouette:.4f}')
+print(f'Davies-Bouldin Score: {wk_davies_bouldin:.4f}')
+print(f'Calinski-Harabasz Score: {wk_calinski_harabasz:.4f}')
 
-# Show the plot
-plt.tight_layout()
-plt.show()
-
-print(f'Silhouette Score: {silhouettebwk:.4f}')
-print(f'Davies-Bouldin Score: {davies_bouldinbwk:.4f}')
-print(f'Calinski-Harabasz Score: {calinski_harabaszbwk:.4f}')
-    
-
-#####################################  Brooklyn / Queens  #####################################
-
-
-# Function to remove outliers using IQR
-def remove_outliers(data, threshold_factor=1.2):    
-    Q1 = data.quantile(0.25)
-    Q3 = data.quantile(0.75)
-    IQR = Q3 - Q1
-    lower_threshold = Q1 - threshold_factor * IQR
-    upper_threshold = Q3 + threshold_factor * IQR
-    outliers = (data < lower_threshold) | (data > upper_threshold)
-    return data[~outliers.any(axis=1)]
-
-wkb_q_noouts = remove_outliers(wk_brk_queen_members[['wk_latitude', 'wk_longitude']])
-
-###---------------------Neighbors 
-from scipy.spatial.distance import cdist
-import numpy as np
-
-# Ch# Calculate distances between data points and init_centers
-qwkdistances = cdist(wkb_q_noouts[['wk_latitude', 'wk_longitude']], b_q_centers)
-
-# Assign each data point to the nearest centroid
-cluster_labels = np.argmin(qwkdistances, axis=1)
-
-# Add the cluster labels to the dataframe
-wkb_q_noouts['cluster'] = cluster_labels
-
-# Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(wkb_q_noouts['wk_longitude'], wkb_q_noouts['wk_latitude'])
-gdf = gpd.GeoDataFrame(wkb_q_noouts, geometry=geometry)
-
-# Plot the GeoDataFrame with different colors for each cluster
-fig, ax = plt.subplots(figsize=(20, 15))
-gdf.plot(column='cluster', categorical=False, markersize=30, cmap='tab20', ax=ax)
-
-# Plot the cluster centers
-for center in b_q_centers:
-    plt.scatter(center[1], center[0], c='black', marker='*', s=150)
-
-# Evaluate the clustering with scores
-silhouetteqwk = silhouette_score(wkb_q_noouts[['wk_latitude', 'wk_longitude']], cluster_labels)
-davies_bouldinqwk = davies_bouldin_score(wkb_q_noouts[['wk_latitude', 'wk_longitude']], cluster_labels)
-calinski_harabaszqwk = calinski_harabasz_score(wkb_q_noouts[['wk_latitude', 'wk_longitude']], cluster_labels)
-
-# Set plot labels and aspect ratio
-plt.title(f'Brooklyn/Queens Home 5-Stars, Sil:{silhouetteq:.4f}')
-plt.xlabel('Longitude')
-plt.ylabel('Latitude')
-plt.gca().set_aspect('equal')
-
-# Show the plot
-plt.tight_layout()
-plt.show()
-
-print(f'Silhouette Score: {silhouetteqwk:.4f}')
-print(f'Davies-Bouldin Score: {davies_bouldinqwk:.4f}')
-print(f'Calinski-Harabasz Score: {calinski_harabaszqwk:.4f}')
-
-#####################################  Staten Island  #####################################
-#!!!
-# Function to remove outliers using IQR
-def remove_outliers(data, threshold_factor=1.4):   
-    Q1 = data.quantile(0.25)
-    Q3 = data.quantile(0.75)
-    IQR = Q3 - Q1
-    lower_threshold = Q1 - threshold_factor * IQR
-    upper_threshold = Q3 + threshold_factor * IQR
-    outliers = (data < lower_threshold) | (data > upper_threshold)
-    return data[~outliers.any(axis=1)]
-
-wkstat_noouts = remove_outliers(wkstaten[['latitude', 'longitude']])
-
-# Ch# Calculate distances between data points and init_centers
-statdistances = cdist(wkstat_noouts[['latitude', 'longitude']], staten_centers)
-
-# Assign each data point to the nearest centroid
-wkstatcluster_labels = np.argmin(statdistances, axis=1)
-
-# Add the cluster labels to the dataframe
-wkstat_noouts['cluster'] = wkstatcluster_labels
-
-# Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(wkstat_noouts['longitude'], wkstat_noouts['latitude'])
-gdf = gpd.GeoDataFrame(wkstat_noouts, geometry=geometry)
-
-# Plot the GeoDataFrame with different colors for each cluster
-fig, ax = plt.subplots(figsize=(20, 15))
-gdf.plot(column='cluster', categorical=False, markersize=30, cmap='tab20', ax=ax)
-
-# Plot the cluster centers
-for center in staten_centers:
-    plt.scatter(center[1], center[0], c='black', marker='*', s=150)
-
-# Evaluate the clustering with scores
-silhouettestw = silhouette_score(wkstat_noouts[['latitude', 'longitude']], wkstatcluster_labels)
-davies_bouldinstw = davies_bouldin_score(wkstat_noouts[['latitude', 'longitude']], wkstatcluster_labels)
-calinski_harabaszstw = calinski_harabasz_score(wkstat_noouts[['latitude', 'longitude']], wkstatcluster_labels)
-
-# Set plot labels and aspect ratio
-plt.title(f'Staten Work 5-Stars, Sil:{silhouetteq:.4f}')
-plt.xlabel('Longitude')
-plt.ylabel('Latitude')
-plt.gca().set_aspect('equal')
-
-# Show the plot
-plt.tight_layout()
-plt.show()
-
-print(f'Silhouette Score BQ: {silhouettestw:.4f}')
-print(f'Davies-Bouldin Score BQ: {davies_bouldinstw:.4f}')
-print(f'Calinski-Harabasz Score BQ: {calinski_harabaszstw:.4f}')
-
-wkstat_noouts = wkstat_noouts.rename(columns={'latitude': 'wk_latitude', 'longitude': 'wk_longitude'})
 
 
 #############--------------------------------------------------------------------------
 
-## Count clusters to see spread
-wkmanh_cluster_counts = wkmanh_noouts['cluster'].value_counts().sort_index()
-wkbronx_cluster_counts = wkbronx_noouts['cluster'].value_counts().sort_index()
-wkbq_cluster_counts = wkb_q_noouts['cluster'].value_counts().sort_index()
-wkstat_cluster_counts = wkstat_noouts['cluster'].value_counts().sort_index()
+wk_cluster_counts = wk_no_outliers['wk_cluster'].value_counts().sort_index()
 
-print(wkmanh_cluster_counts)
-print(wkbronx_cluster_counts)
-print(wkbq_cluster_counts)
-print(wkstat_cluster_counts)
-
-
-####Cluster change for right cluster number
-wkman_cluster = {0:8, 1:9, 2:10, 3:23, 4:29}
-wkmanh_noouts['cluster'] = wkmanh_noouts['cluster'].replace(wkman_cluster)
-
-wkbronx_cluster = {0:24, 1:25, 2:26, 3:27, 4:28}
-wkbronx_noouts['cluster'] = wkbronx_noouts['cluster'].replace(wkbronx_cluster)
-
-wkb_q_cluster = {8:11, 9:13, 10:14, 11:15, 12:16, 13:18, 14:19, 15:21, 16:22}
-wkb_q_noouts['cluster'] = wkb_q_noouts['cluster'].replace(wkb_q_cluster)
-
-wkstat_cluster = {0:30, 1:31}
-wkstat_noouts['cluster'] = wkstat_noouts['cluster'].replace(wkstat_cluster)
-
-
-#!!!
-#join all dataframes back into one
-work_members = pd.concat([wkmanh_noouts, wkbronx_noouts, wkb_q_noouts, wkstat_noouts])
+print(wk_cluster_counts)
 
 
 ###make things pretty
-wkaddress = pd.merge(
+wk_address = pd.merge(
     wk_addy[['Person_id', 'zip', 'wk_latitude', 'wk_longitude', 'relation']],
-    work_members[['wk_latitude', 'wk_longitude', 'cluster']],
+    wk_no_outliers[['wk_latitude', 'wk_longitude', 'wk_cluster']],
     on=['wk_latitude', 'wk_longitude'],
     how='left'
 )
 
-wkaddress_no_dupes = wkaddress.drop_duplicates()
-
-wkaddress = pd.merge(
-        wkaddress_no_dupes[['Person_id', 'zip', 'wk_latitude', 'wk_longitude', 'relation', 'cluster']],
-        all_5stars[[ 'latitude', 'longitude', 'cluster', 'Centername', 'practicename']],
-        on=['cluster'],
-        how='left'
-        )
-
-#fix column names
-wkaddress = wkaddress.rename({'latitude':'cluster_latitude', 'longitude': 'cluster_longitude'}, axis=1)
-
-#keep only non NAN rows
-wkaddress_no_nan = wkaddress.dropna(subset=['cluster'])
+wk_address_no_dupes = wk_address.drop_duplicates()
 
 
-###############################  NULL Member clusters  #######################################
-wknan_cluster_df = wkaddress[wkaddress['cluster'].isna()][['Person_id', 'wk_latitude', 'wk_longitude']]
+wk_address = pd.merge( 
+    wk_address_no_dupes[['Person_id', 'zip', 'wk_latitude', 'wk_longitude', 'wk_cluster', 'relation']], 
+    manh_5stars[['cluster', 'latitude', 'longitude', 'practicename']],
+    left_on= ['wk_cluster'],
+    right_on=['cluster'],
+    how= 'left'
+    )
 
-wknan_cluster_df_t = wknan_cluster_df[(wknan_cluster_df['wk_latitude'] >= 40.4) & (wknan_cluster_df['wk_longitude'] >= -74.02)  & (wknan_cluster_df['wk_longitude'] <= -73.5) & (wknan_cluster_df['wk_latitude'] <= 40.9)]
-
-wknan_cluster_df = wknan_cluster_df_t
-
-#### Calculate distances between data points and init_centers
-wkdistances = cdist(wknan_cluster_df[['wk_latitude', 'wk_longitude']], init_centers)
-
-# Assign each data point to the nearest centroid
-wkcluster_labels = np.argmin(wkdistances, axis=1)
-
-# Add the cluster labels to the dataframe
-wknan_cluster_df['cluster'] = wkcluster_labels
-
-# Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(wknan_cluster_df['wk_longitude'], wknan_cluster_df['wk_latitude'])
-gdf = gpd.GeoDataFrame(wknan_cluster_df, geometry=geometry)
-
-# Plot the GeoDataFrame with different colors for each cluster
-fig, ax = plt.subplots(figsize=(20, 15))
-gdf.plot(column='cluster', categorical=False, markersize=30, cmap='tab20', ax=ax)
-
-# Plot the cluster centers
-for center in all_centers:
-    plt.scatter(center[1], center[0], c='black', marker='*', s=100)
-
-
-# Set plot labels and aspect ratio
-plt.title('Clustering Around Home 5-Stars')
-plt.xlabel('Longitude')
-plt.ylabel('Latitude')
-plt.gca().set_aspect('equal')
-
-# Show the plot
-plt.tight_layout()
-plt.show()
-
-# Evaluate the clustering with scores
-wksilhouette_nan = silhouette_score(wknan_cluster_df[['wk_latitude', 'wk_longitude']], wkcluster_labels)
-wkdavies_bouldin_nan = davies_bouldin_score(wknan_cluster_df[['wk_latitude', 'wk_longitude']], wkcluster_labels)
-wkcalinski_harabasz_nan = calinski_harabasz_score(wknan_cluster_df[['wk_latitude', 'wk_longitude']], wkcluster_labels)
-
-print(f'Silhouette Score nan: {wksilhouette_nan:.4f}')
-print(f'Davies-Bouldin Score nan: {wkdavies_bouldin_nan:.4f}')
-print(f'Calinski-Harabasz Score nan: {wkcalinski_harabasz_nan:.4f}')
-
-###########################
-
-###make things pretty
-wkaddress_t = pd.merge(
-    wk_addy[['Person_id', 'zip', 'wk_latitude', 'wk_longitude', 'relation']],
-    wknan_cluster_df[['wk_latitude', 'wk_longitude', 'cluster']],
-    on=['wk_latitude', 'wk_longitude'],
-    how='right'
-)
-
-wkaddress_t_no_dupes = wkaddress_t.drop_duplicates()
-
-wkaddress_t = pd.merge(
-        wkaddress_t_no_dupes[['Person_id', 'zip', 'wk_latitude', 'wk_longitude', 'relation', 'cluster']],
-        all_5stars[[ 'latitude', 'longitude', 'cluster', 'Centername', 'practicename']],
-        on=['cluster'],
-        how='left'
-        )
-
-wkaddress_t = wkaddress_t.rename(columns={
-    'latitude': 'cluster_latitude',
-    'longitude': 'cluster_longitude'
-})
-
-#join back the nan into original one
-address_wk_full = pd.concat([wkaddress_no_nan, wkaddress_t])
-
-
-address_wk_full = address_wk_full.drop_duplicates()
-
-
+# ##Rename columns for clarity
+wk_address = wk_address.rename(columns={'latitude': 'cluster_latitude', 'longitude': 'cluster_longitude'})
 
 ####calculation for distance from centroid and averages
-def calculate_ratio_of_distances_above_threshold_wk(df):
+def calculate_ratio_of_distances_above_threshold(df):
     # Calculate the haversine distances and assign them to a new column
     df['distance_to_centroid'] = df.apply(
         lambda row: haversine(row['wk_latitude'], row['wk_longitude'], row['cluster_latitude'], row['cluster_longitude']),
@@ -1409,78 +1233,51 @@ def calculate_ratio_of_distances_above_threshold_wk(df):
 
     return ratio
 
+# Distance calculation:
+wk_result = calculate_ratio_of_distances_above_threshold(wk_address)
+print(wk_result)
 
-resultwk = calculate_ratio_of_distances_above_threshold_wk(address_wk_full)
-print(resultwk)
 
 
-def add_average_distance_column_wk(dfwk):
-    for cluster in dfwk['cluster'].unique():
-        if not pd.isna(cluster):
-            dfwk.loc[dfwk['cluster'] == cluster, 'average_distance_to_centroid'] = dfwk.groupby('cluster')['distance_to_centroid'].mean()[cluster]
-            dfwk.loc[dfwk['cluster'] == cluster, 'cluster_stdev'] = dfwk.groupby('cluster')['distance_to_centroid'].std()[cluster]
-    return dfwk
+def add_average_distance_column(df):
+    for cluster in df['cluster'].unique():
+        # Skip rows with NaN values in 'distance_to_centroid' column
+        cluster_data = df[df['cluster'] == cluster].copy()
+        if cluster_data['distance_to_centroid'].notna().all():
+            avg_distance = cluster_data['distance_to_centroid'].mean()
+            stdev_distance = cluster_data['distance_to_centroid'].std()
+            df.loc[df['cluster'] == cluster, 'average_distance_to_centroid'] = avg_distance
+            df.loc[df['cluster'] == cluster, 'cluster_stdev'] = stdev_distance
+        else:
+            # Handle the case where there are NaN values
+            df.loc[df['cluster'] == cluster, 'average_distance_to_centroid'] = np.nan
+            df.loc[df['cluster'] == cluster, 'cluster_stdev'] = np.nan
 
-dfwk = add_average_distance_column_wk(address_wk_full.copy())
+    return df
+
+wk_df = add_average_distance_column(wk_address.copy())
 
 
 ################
 # Get the distinct values of the averages column and cluster_stdev column
-distinct_averages = dfwk['average_distance_to_centroid'].unique()
-distinct_stds = dfwk['cluster_stdev'].unique()
+wk_distinct_averages = wk_df['average_distance_to_centroid'].unique()
+wk_distinct_stds = wk_df['cluster_stdev'].unique()
 
 # Group the dataframe by the 'cluster' column
-grouped_dfwk = dfwk.groupby('cluster')
+wk_grouped_df = wk_df.groupby('cluster')
 
 # Create an empty dictionary to store results for each cluster
-cluster_resultswk = {}
+wk_cluster_results = {}
 
 # Iterate over each group (cluster) in the grouped DataFrame
-for cluster, group in grouped_dfwk:
+for cluster, group in wk_grouped_df:
     # Calculate the ratio of distances above threshold for the current cluster
-    ratio = calculate_ratio_of_distances_above_threshold_wk(group)
+    ratio = calculate_ratio_of_distances_above_threshold(group)
     
     # Store the result in the dictionary with the cluster as the key
-    cluster_resultswk[cluster] = ratio
+    wk_cluster_results[cluster] = ratio
 
 # Print the results for each cluster
-for cluster, ratio in cluster_resultswk.items():
+for cluster, ratio in wk_cluster_results.items():
     print(f"Cluster {cluster}: Ratio = {ratio}")
-  
-########################################################  Whole View of Work
-
-# Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(dfwk['wk_longitude'], dfwk['wk_latitude'])
-gdf = gpd.GeoDataFrame(dfwk, geometry=geometry)
-
-# Plot the GeoDataFrame with different colors for each cluster
-fig, ax = plt.subplots(figsize=(20, 15))
-gdf.plot(column='cluster', categorical=False, markersize=50, cmap='tab20', ax=ax)
-
-# Plot the cluster centers
-for center in all_centers:
-    plt.scatter(center[1], center[0], c='black', marker='*', s=100)
-
-
-# Set plot labels and aspect ratio
-plt.title('Clustering Around Work 5-Stars')
-plt.xlabel('Longitude')
-plt.ylabel('Latitude')
-plt.gca().set_aspect('equal')
-
-# Show the plot
-plt.tight_layout()
-plt.show()
-
-
-
-
-
-
-# # #### save to csv
-# address_wk_full.to_csv(r'C:\PATH\Data\wk_clusters.csv', index=False)
-
-#dfwk.to_sql('wk_member_Fivestar1', con, schema='Temp', index=False, chunksize=1000, if_exists='replace')
-
-
-close_all_connections()
+################    
