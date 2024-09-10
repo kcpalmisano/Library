@@ -926,6 +926,78 @@ plt.show()
 
 #df.to_sql('Member_Fivestar1', con, schema='Temp', index=False, chunksize=1000, if_exists='replace')
 
+####!!! MTA 
+##Subway plot map
+
+url = 'https://data.ny.gov/api/views/39hk-dx4f/rows.csv?accessType=DOWNLOAD'
+
+mta = pd.read_csv(url)
+mta.columns
+
+# Create a GeoDataFrame from the dataframe
+geometry = gpd.points_from_xy(mta['GTFS Longitude'], mta['GTFS Latitude'])
+gdf = gpd.GeoDataFrame(mta, geometry=geometry)
+
+# Plot the GeoDataFrame with different colors for each cluster
+fig, ax = plt.subplots(figsize=(20, 15))
+gdf.plot(column = 'Station ID', categorical=False, markersize=50, cmap='tab20', ax=ax)
+
+# Plot the cluster centers
+for center in all_centers:
+    plt.scatter(center[1], center[0], c='black', marker='*', s=100)
+
+
+# Set plot labels and aspect ratio
+plt.title('MTA Subway Stations ')
+plt.xlabel('Longitude')
+plt.ylabel('Latitude')
+plt.gca().set_aspect('equal')
+
+# Show the plot
+plt.tight_layout()
+plt.show()
+
+
+
+##SUBWAY/Members overlay
+# Create GeoDataFrames for both datasets
+geometry_mta = gpd.points_from_xy(mta['GTFS Longitude'], mta['GTFS Latitude'])
+gdf_mta = gpd.GeoDataFrame(mta, geometry=geometry_mta)
+
+geometry_members = gpd.points_from_xy(df['longitude'], df['latitude'])
+gdf_members = gpd.GeoDataFrame(df, geometry=geometry_members)
+
+# Ensure both GeoDataFrames use the same CRS ##--  Assuming both datasets use WGS84
+gdf_mta = gdf_mta.set_crs("EPSG:4326")  
+gdf_members = gdf_members.set_crs("EPSG:4326")
+
+# Create the plot and plot both GeoDataFrames
+fig, ax = plt.subplots(figsize=(20, 15))
+
+# Plot member locations
+gdf_members.plot(column='cluster', categorical=False, markersize=50, cmap='tab20', ax=ax, label="Member Locations")
+
+# Plot subway stations
+gdf_mta.plot(marker='o', color='black', markersize=7, ax=ax, alpha=0.9, label="MTA Subway Stations")
+
+# Plot cluster centers for member locations
+for center in all_centers:
+    plt.scatter(center[1], center[0], c='red', marker='*', s=200, label="Cluster Centers")
+
+# Set plot labels and aspect ratio
+plt.title('Member Locations and MTA Subway Stations')
+plt.xlabel('Longitude')
+plt.ylabel('Latitude')
+plt.gca().set_aspect('equal')
+
+# Show the plot
+plt.tight_layout()
+plt.show()
+
+
+
+
+
 
 close_all_connections()
 #############---------------------------------------------------Work Addys
