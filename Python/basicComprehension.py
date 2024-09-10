@@ -17,6 +17,19 @@ print(greet(name="Casey", greeting="Hi"))
 ##Hi, Casey!
 
 ###=====================================
+'''
+List:
+A list is a mutable, ordered collection that can hold elements of different data types. Lists are defined with square brackets [].
+my_list = [1, 2, 3, "apple", "banana"]
+
+Array:
+In Python, arrays are typically implemented using libraries like NumPy because Python’s built-in lists are used in a similar way. NumPy arrays are more efficient for numerical operations.
+my_array = np.array([1, 2, 3, 4])
+
+ Dictionary:
+A dictionary is a mutable, unordered collection of key-value pairs. Dictionaries are defined using curly braces {}.
+my_dict = {"name": "John", "age": 30, "city": "New York"}
+'''
 
 ##positional arguments
 def print_args(*args):
