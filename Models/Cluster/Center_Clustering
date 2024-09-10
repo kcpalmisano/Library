@@ -442,6 +442,62 @@ print(f'Davies-Bouldin Score Mnh: {davies_bouldin:.4f}')
 print(f'Calinski-Harabasz Score Mnh: {calinski_harabasz:.4f}')
 
 
+### MTA metrobus 
+import requests
+import zipfile
+import io
+
+url = 'https://rrgtfsfeeds.s3.amazonaws.com/gtfs_m.zip'
+
+# Download the ZIP file from the URL
+response = requests.get(url)
+
+# Open the ZIP file in memory
+zip_file = zipfile.ZipFile(io.BytesIO(response.content))
+
+# Extract and read the specific file 'shapes.txt'
+with zip_file.open('stops.txt') as shapes_file:
+    mhtn_bus = pd.read_csv(shapes_file)
+
+
+
+# Create GeoDataFrames for both datasets (bus stations and Manhattan clustering)
+geometry_mta = gpd.points_from_xy(mhtn_bus['stop_lon'], mhtn_bus['stop_lat'])  # Bus stop coordinates
+gdf_mta = gpd.GeoDataFrame(mhtn_bus, geometry=geometry_mta)
+
+geometry_members = gpd.points_from_xy(manh_noouts['longitude'], manh_noouts['latitude'])  # Member coordinates
+gdf_members = gpd.GeoDataFrame(manh_noouts, geometry=geometry_members)
+
+# Ensure both GeoDataFrames use the same CRS (WGS84 - EPSG:4326 is commonly used for GPS coordinates)
+gdf_mta = gdf_mta.set_crs("EPSG:4326")
+gdf_members = gdf_members.set_crs("EPSG:4326")
+
+# Create the plot and overlay both GeoDataFrames
+fig, ax = plt.subplots(figsize=(20, 15))
+
+# Plot member locations with a colormap
+gdf_members.plot(column='cluster', categorical=False, markersize=50, cmap='tab20', ax=ax, label="Member Locations")
+
+# Plot bus stations with a distinct color (red)
+gdf_mta.plot(marker='o', color='black', markersize=5, ax=ax, alpha=0.9, label="MTA Bus Stations")
+
+# Plot cluster centers for member locations
+for center in m_centers:
+    plt.scatter(center[1], center[0], c='red', marker='*', s=400, label="Cluster Centers")
+
+# Set plot labels and aspect ratio
+plt.title('Manhattan Member Locations and MTA Bus Stations')
+plt.xlabel('Longitude')
+plt.ylabel('Latitude')
+plt.gca().set_aspect('equal')
+
+
+
+# Show the plot
+plt.tight_layout()
+plt.show()
+
+
 #####################################  Bronx  #####################################
 
 # Function to remove outliers using IQR
