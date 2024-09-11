@@ -63,7 +63,7 @@ def start_sql_job_report(cursor, job_type:str='SCHEMA.Provider792', source:str='
         Parameters
         ----------
             cursor: pyodbc.cursor
-                Cursor object that connects to DbHfProd to execute queries
+                Cursor object that connects to database to execute queries
             job_type:str
                 name of job which will be added ot the job_type column in main.jobs
             source_folder: str 
@@ -81,7 +81,7 @@ def start_sql_job_report(cursor, job_type:str='SCHEMA.Provider792', source:str='
                 the job id of the newly initiated job
     """
     sql = """SET NOCOUNT ON;
-              INSERT INTO DbHfProd.Main.Jobs
+              INSERT INTO Jobs
               (JobType, JobStart, JobDescription, IsTest) 
               VALUES
               ('{0}','{1}', '{2}', '{3}');
@@ -308,7 +308,7 @@ def create_job_details_log(cursor, job_id:int, job_detail_info:str, test:bool = 
         Parameters:
         ----------
         cursor: pyodbc.cursor
-            Cursor object that connects to DbHfProd to execute queries
+            Cursor object that connects to database to execute queries
         job_id:int
         
         ##TO BE ADDED LATER (?)
@@ -327,7 +327,7 @@ def create_job_details_log(cursor, job_id:int, job_detail_info:str, test:bool = 
         test_prefix = ''
     try:
         sql = """SET NOCOUNT ON;
-                INSERT INTO DbHfProd.Main.JobDetails
+                INSERT INTO JobDetails
                 (jobId,JobDetailInfo)
                 VALUES
                 ({0},'{1}');
@@ -348,12 +348,12 @@ def close_out_job_log(cursor, job_id:int):
         Parameters:
         -----------
         cursor: pyodbc.cursor
-            Cursor object that connects to DbHfProd to execute queries
+            Cursor object that connects to database to execute queries
         job_id:int 
             job id of the job that is being closed out
     """
     sql = """SET NOCOUNT ON;
-            UPDATE DbHfProd.Main.Jobs
+            UPDATE Jobs
             SET JobEnd = '{0}'
             WHERE JobId = {1};
         """.format(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), job_id)
@@ -445,8 +445,6 @@ def main():
         print('Stored procedure failed to execute.')
 
     
-
-
 #***************************All the setup**************************#
 # Get the current date and time once for the job instead of calling it on every loop.
 maintainer = 'EMAIL@GMAIL.com'
@@ -490,7 +488,7 @@ create_job_details_log(cursor, job_id, job_detail_info='792 ETL Run')
 
 #!!!
 #---------------------
-###Old file load for On Ramp
+###Old file load for On-Ramp
 # df = pd.read_csv('//PATH//792_Flag//32BJ_Flag792_20230710.csv')
 
 # ##### TEST FILE #####
@@ -512,12 +510,6 @@ except OSError:
 
 #-------------------------------  Data clean up 
 
-# # Assign column names to the DataFrame
-# column_names = ['PROV-ID', 'NPI', 'TAX', 'LASTNAME', 'FIRSTNAME', 'MI','ORG NAME', 'ADDRESS1', 'ADDRESS2',
-#           'CITY', 'STATE', 'ZIP', 'ZIP4', 'PHONE', 'DEGREE', 'GENDER', 'FAX', 'SPEC1CODE', 'SPEC2CODE', 'SPEC3CODE', 'SPEC4CODE', 'POAKEY', 'PADRSKEY']
-# df.columns = column_names
-
-
 # # ##Create the Location column from the EPIN 
 df['LOCATION'] = df['PROV-ID'].str[-1]
 
@@ -529,8 +521,6 @@ df['Date_added'] = np.nan
 
 df['Date_added'] = pd.to_datetime(df['Date_added'])   #convert to proper type
  
-#df['Date_added'] = today    #add today's date for tracking 
-
 
 ##### FlagID creation 
 #change to string for ID creation
@@ -615,12 +605,6 @@ df_out['DateRemoved'] = np.nan
 df_out['DateRemoved'] = pd.to_datetime(df_out['DateRemoved'])   #convert to proper type
 
 df_out['Source_type'] = 'SPS'
-
-# # Replace empty fields with NaN in specific columns
-# columns_to_replace = ['LOCATION', 'TAX', 'ZIP']
-# df_out[columns_to_replace] = df_out[columns_to_replace].replace('', np.nan)
-# df_out[columns_to_replace] = df_out[columns_to_replace].replace(' ', np.nan)
-# df_out['TAX'] = df_out['TAX'].replace('n', np.nan)
 
 
 columns_to_convert = ['LOCATION', 'TAX', 'ZIP']
