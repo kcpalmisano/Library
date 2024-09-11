@@ -1159,6 +1159,70 @@ plt.gca().set_aspect('equal')
 plt.tight_layout()
 plt.show()
 
+
+##### MTA Railroad stops
+rr_urls = [ 'https://rrgtfsfeeds.s3.amazonaws.com/gtfslirr.zip',
+           'https://rrgtfsfeeds.s3.amazonaws.com/gtfsmnr.zip']
+
+rr_stops = download_and_extract(rr_urls)
+
+# ##### Remove stops past  
+fltrd_rr = rr_stops[(rr_stops['stop_lon'] > -73.6) | (rr_stops['stop_lat'] > 40.9)]
+rr_cond = (rr_stops['stop_lon']  > -73.6) | (rr_stops['stop_lat'] > 40.9)
+rr_stops = rr_stops[~rr_cond]
+
+# #####Double check with a visual 
+# # Create a GeoDataFrame from the dataframe
+# geometry = gpd.points_from_xy(rr_stops['stop_lon'], rr_stops['stop_lat'])
+# gdf = gpd.GeoDataFrame(rr_stops, geometry=geometry)
+
+# # Plot the GeoDataFrame with different colors for each cluster
+# fig, ax = plt.subplots(figsize=(20, 15))
+# gdf.plot(column='stop_id', categorical=False, markersize=30, cmap='tab20', ax=ax)
+
+# # Plot the cluster centers
+# for center in all_centers:
+#     plt.scatter(center[1], center[0], c='black', marker='*', s=100)
+
+# # Show the plot
+# plt.tight_layout()
+# plt.show()    
+
+####Load RR stop data over clustering 
+# Create GeoDataFrames for both datasets (bus stations and clustering)
+geometry_mta = gpd.points_from_xy(rr_stops['stop_lon'], rr_stops['stop_lat'])  # Bus stop coordinates
+gdf_mta = gpd.GeoDataFrame(rr_stops, geometry=geometry_mta)
+
+geometry_members = gpd.points_from_xy(df['longitude'], df['latitude'])  # Member coordinates
+gdf_members = gpd.GeoDataFrame(df, geometry=geometry_members)
+
+# Ensure both GeoDataFrames use the same CRS (WGS84 - EPSG:4326 is commonly used for GPS coordinates)
+gdf_mta = gdf_mta.set_crs("EPSG:4326")
+gdf_members = gdf_members.set_crs("EPSG:4326")
+
+# Create the plot and overlay both GeoDataFrames
+fig, ax = plt.subplots(figsize=(20, 15))
+
+# Plot member locations with a colormap
+gdf_members.plot(column='cluster', categorical=False, markersize=50, cmap='tab20', ax=ax, label="Member Locations")
+
+# Plot bus stations with a distinct color (red)
+gdf_mta.plot(marker='o', color='black', markersize=25, ax=ax, alpha=0.9, label="MTA Bus Stations")
+
+# Plot cluster centers for member locations
+for center in all_centers:
+    plt.scatter(center[1], center[0], c='red', marker='*', s=200, label="Cluster Centers")
+
+# Set plot labels and aspect ratio
+plt.title('Manhattan Member Locations and MTA Bus Stations')
+plt.xlabel('Longitude')
+plt.ylabel('Latitude')
+plt.gca().set_aspect('equal')
+
+# Show the plot
+plt.tight_layout()
+plt.show()
+
 close_all_connections()
 #############---------------------------------------------------Work Addys
 #!!!
