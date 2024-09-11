@@ -976,13 +976,14 @@ plt.tight_layout()
 plt.show()
 
 
-
 # # #### save to csv
 # df.to_csv(r'C:\PATH\Data\clusters.csv', index=False)
 
 #df.to_sql('Member_Fivestar1', con, schema='Temp', index=False, chunksize=1000, if_exists='replace')
 
-####!!! MTA 
+
+#### MTA 
+#!!!
 ##Subway plot map
 
 url = 'https://data.ny.gov/api/views/39hk-dx4f/rows.csv?accessType=DOWNLOAD'
@@ -990,32 +991,33 @@ url = 'https://data.ny.gov/api/views/39hk-dx4f/rows.csv?accessType=DOWNLOAD'
 mta = pd.read_csv(url)
 mta.columns
 
-# Create a GeoDataFrame from the dataframe
-geometry = gpd.points_from_xy(mta['GTFS Longitude'], mta['GTFS Latitude'])
-gdf = gpd.GeoDataFrame(mta, geometry=geometry)
+# ##Double check with a visual 
+# # Create a GeoDataFrame from the dataframe
+# geometry = gpd.points_from_xy(mta['GTFS Longitude'], mta['GTFS Latitude'])
+# gdf = gpd.GeoDataFrame(mta, geometry=geometry)
 
-# Plot the GeoDataFrame with different colors for each cluster
-fig, ax = plt.subplots(figsize=(20, 15))
-gdf.plot(column = 'Station ID', categorical=False, markersize=50, cmap='tab20', ax=ax)
+# # Plot the GeoDataFrame with different colors for each cluster
+# fig, ax = plt.subplots(figsize=(20, 15))
+# gdf.plot(column = 'Station ID', categorical=False, markersize=50, cmap='tab20', ax=ax)
 
-# Plot the cluster centers
-for center in all_centers:
-    plt.scatter(center[1], center[0], c='black', marker='*', s=100)
-
-
-# Set plot labels and aspect ratio
-plt.title('MTA Subway Stations ')
-plt.xlabel('Longitude')
-plt.ylabel('Latitude')
-plt.gca().set_aspect('equal')
-
-# Show the plot
-plt.tight_layout()
-plt.show()
+# # Plot the cluster centers
+# for center in all_centers:
+#     plt.scatter(center[1], center[0], c='black', marker='*', s=100)
 
 
+# # Set plot labels and aspect ratio
+# plt.title('MTA Subway Stations ')
+# plt.xlabel('Longitude')
+# plt.ylabel('Latitude')
+# plt.gca().set_aspect('equal')
 
-##SUBWAY/Members overlay
+# # Show the plot
+# plt.tight_layout()
+# plt.show()
+
+
+
+#### Load subways stops over clustering 
 # Create GeoDataFrames for both datasets
 geometry_mta = gpd.points_from_xy(mta['GTFS Longitude'], mta['GTFS Latitude'])
 gdf_mta = gpd.GeoDataFrame(mta, geometry=geometry_mta)
@@ -1052,8 +1054,110 @@ plt.show()
 
 
 
+### MTA metrobus 
+import requests
+import zipfile
+import io
+
+    
+urls = ['https://rrgtfsfeeds.s3.amazonaws.com/gtfs_busco.zip',
+        'https://rrgtfsfeeds.s3.amazonaws.com/gtfs_m.zip',
+        'https://rrgtfsfeeds.s3.amazonaws.com/gtfs_bx.zip',
+        'https://rrgtfsfeeds.s3.amazonaws.com/gtfs_b.zip', 
+        'https://rrgtfsfeeds.s3.amazonaws.com/gtfs_q.zip',
+        'https://rrgtfsfeeds.s3.amazonaws.com/gtfs_si.zip']
 
 
+def download_and_extract(urls):
+    all_data = []
+    
+    for url in urls:
+        try:
+            response = requests.get(url) #get url and download
+            response.raise_for_status() #check for successful request
+            
+            #open zip in memory
+            zip_file = zipfile.ZipFile(io.BytesIO(response.content))
+            
+            #extract and read file
+            with zip_file.open('stops.txt') as stops_file:
+                bus_stops = pd.read_csv(stops_file)
+                all_data.append(bus_stops)
+                
+
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to download from {url}: {e}")
+        except zipfile.BadZipFile:
+            print(f"Invalid ZIP file from {url}")
+        except KeyError:
+            print(f"'stops.txt' not found in the ZIP from {url}")
+        except pd.errors.EmptyDataError:
+            print(f"'stops.txt' in {url} is empty")
+            
+        # Check if we have any DataFrames to concatenate
+    if all_data:
+        combined_df = pd.concat(all_data, ignore_index=True)  # Combine all DataFrames
+    else:
+        combined_df = pd.DataFrame()  # Return an empty DataFrame if no data
+
+    return combined_df        
+                
+bus_stops = download_and_extract(urls)
+
+
+# #####Double check with a visual 
+# # Create a GeoDataFrame from the dataframe
+# geometry = gpd.points_from_xy(bus_stops['stop_lon'], bus_stops['stop_lat'])
+# gdf = gpd.GeoDataFrame(bus_stops, geometry=geometry)
+
+# # Plot the GeoDataFrame with different colors for each cluster
+# fig, ax = plt.subplots(figsize=(20, 15))
+# gdf.plot(column='stop_id', categorical=False, markersize=30, cmap='tab20', ax=ax)
+
+# # Plot the cluster centers
+# for center in m_centers:
+#     plt.scatter(center[1], center[0], c='black', marker='*', s=100)
+
+# # Show the plot
+# plt.tight_layout()
+# plt.show()    
+
+
+
+####Load bus stop data over clustering 
+# Create GeoDataFrames for both datasets (bus stations and Manhattan clustering)
+geometry_mta = gpd.points_from_xy(bus_stops['stop_lon'], bus_stops['stop_lat'])  # Bus stop coordinates
+gdf_mta = gpd.GeoDataFrame(bus_stops, geometry=geometry_mta)
+
+geometry_members = gpd.points_from_xy(df['longitude'], df['latitude'])  # Member coordinates
+gdf_members = gpd.GeoDataFrame(df, geometry=geometry_members)
+
+# Ensure both GeoDataFrames use the same CRS (WGS84 - EPSG:4326 is commonly used for GPS coordinates)
+gdf_mta = gdf_mta.set_crs("EPSG:4326")
+gdf_members = gdf_members.set_crs("EPSG:4326")
+
+# Create the plot and overlay both GeoDataFrames
+fig, ax = plt.subplots(figsize=(20, 15))
+
+# Plot member locations with a colormap
+gdf_members.plot(column='cluster', categorical=False, markersize=50, cmap='tab20', ax=ax, label="Member Locations")
+
+# Plot bus stations with a distinct color (red)
+gdf_mta.plot(marker='o', color='black', markersize=1, ax=ax, alpha=0.9, label="MTA Bus Stations")
+
+# Plot cluster centers for member locations
+for center in all_centers:
+    plt.scatter(center[1], center[0], c='red', marker='*', s=400, label="Cluster Centers")
+
+# Set plot labels and aspect ratio
+plt.title('Manhattan Member Locations and MTA Bus Stations')
+plt.xlabel('Longitude')
+plt.ylabel('Latitude')
+plt.gca().set_aspect('equal')
+
+# Show the plot
+plt.tight_layout()
+plt.show()
 
 close_all_connections()
 #############---------------------------------------------------Work Addys
