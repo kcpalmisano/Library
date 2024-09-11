@@ -99,7 +99,7 @@ path = r" *PATH* /Data/TIN_CCN.csv"
 data = pd.read_csv(path)
 
 ###pull CCN to Syst from AHRQ 2022 file
-url = 'https://www.ahrq.gov/sites/default/files/wysiwyg/chsp/compendium/chsp-hospital-linkage-2022-rev.xlsx'
+url = 'https://www.ahrq.gov/PATH/wysiwyg/chsp/compendium/chsp-hospital-linkage-2022-rev.xlsx'
 
 ccn = pd.read_excel(url)
 
