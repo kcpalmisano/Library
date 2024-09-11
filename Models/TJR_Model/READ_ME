@@ -1,8 +1,8 @@
-The Model_Build&Testing was the background work that lead to the TJR model. 
+The TJRModel_Build_Testing was the background work that lead to the TJR model. 
 The model goal is to predict members that would be appropriate for the TJR program. 
 The model is to run against daily incoming claims and provide members for outreach on their enrollment into the program. 
-TJR requirements were provided by the business. 
+TJR requirements were provided by the business and preset in a flag in SQL. 
 
-The model was eventually used in a cloud deployment but for testing purposes and POC a pickle was used to call the 
-model against the data. 
+The model was eventually used in a cloud deployment but for testing purposes and POC.
+A pickle was used to call the model against the data daily in testing but would be moved to Azure for deployment. 
 
