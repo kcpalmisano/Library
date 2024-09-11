@@ -87,24 +87,8 @@ data = pd.read_sql_query('''
                              from TABLE1 cu  
 					left join TABLE2 rec
 					on cu.person_id = rec.person_id
-                      where  YEAR(ServiceStartDate) =2019
-                      --and MONTH(ServiceStartDate) <=6
                           ''', con)
-################
-'''
-RowCnt  Year
-66866	2013
-1240947	2014    
-5181645	2015    
-5790840	2016     
-5788062	2017    
-6054217	2018
-6298206	2019
-5854326	2020
-6725528	2021
-4677275	2022   
-101361	2023  (approx) 
-'''
+
 ###############################
 ### General Clean up
 
