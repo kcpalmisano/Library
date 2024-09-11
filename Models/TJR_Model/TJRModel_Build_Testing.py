@@ -5,7 +5,6 @@ Created on Mon Jan 30 09:39:01 2023
 @author: cpalmisano
 """
 
-
 #basic load
 import pandas as pd
 import numpy as np
@@ -15,24 +14,48 @@ import pyodbc
 import sqlalchemy
 from sqlalchemy.orm import sessionmaker 
 
-
 #ML load
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-
-
 from sklearn import metrics
 
-def buildROC(target_test,test_preds):
+def buildROC(target_test, test_preds):
+    """
+    Purpose:
+        Build and plot the Receiver Operating Characteristic (ROC) curve and calculate the Area Under the Curve (AUC).
+    
+    Args:
+        target_test (array-like): The ground truth (true labels) for the test data.
+        test_preds (array-like): The predicted probabilities or scores from the model.
+
+    Returns:
+        None: The function plots the ROC curve and prints the AUC value.
+    
+    Notes:
+        - The ROC curve is a graphical representation of a classifier's performance.
+        - AUC (Area Under the Curve) provides a single metric to summarize this performance, with a higher value indicating better performance.
+    """
+    # Compute False Positive Rate (FPR) and True Positive Rate (TPR)
     fpr, tpr, threshold = metrics.roc_curve(target_test, test_preds)
+    
+    # Calculate the Area Under the Curve (AUC)
     roc_auc = metrics.auc(fpr, tpr)
+    
+    # Plot the ROC curve
     plt.title('Receiver Operating Characteristic')
-    plt.plot(fpr, tpr, 'b', label = 'AUC = %0.2f' % roc_auc)
-    plt.legend(loc = 'lower right')
-    plt.plot([0, 1], [0, 1],'r--')
+    plt.plot(fpr, tpr, 'b', label='AUC = %0.2f' % roc_auc)
+    
+    # Add diagonal reference line for a random classifier
+    plt.plot([0, 1], [0, 1], 'r--')
+    
+    # Add axis labels
     plt.ylabel('True Positive Rate')
     plt.xlabel('False Positive Rate')
+    
+    # Display the legend and plot
+    plt.legend(loc='lower right')
+    plt.show()
 
 #####Timing START
 import time
@@ -47,7 +70,6 @@ conn = pyodbc.connect('Driver={SQL Server};'
                       'Database=DATABASE;'       ##DATABASE
                       'Trusted_Connection=yes;')
 cursor = conn.cursor()
-
 conn.autocommit = True
 
 
@@ -72,7 +94,7 @@ end_time = time.monotonic()
 print("Starting Data pull from SQL",timedelta(seconds=end_time - start_time))
 
 data1 = pd.read_sql_query('''
-          SELECT top 1000 cft.PERSON_ID,
+     cft.PERSON_ID,
        PatientDOB AS DOB,
        PatientGender,
        ServiceStartDate,
@@ -81,31 +103,30 @@ data1 = pd.read_sql_query('''
        DiagnosisCodePrincipal,
        DiagnosisCode1,
        HfClaimId,
-       --osteo_hip_dummy,
-       --osteo_knee_dummy,
-       --esrd_dummy,
-       CASE WHEN tjr.person_id IS NOT NULL THEN 1 ELSE 0 END AS TJR,
+       CASE WHEN tjr.person_id IS NOT NULL THEN 1 
+           ELSE 0 
+            END AS TJR,
        RevenueCode AS revcode,
        DiagnosisCodePrincipal AS DxCodeP,
        DiagnosisCode1 AS DxCode1,
        BillingTaxId AS BTaxId,
        PlaceOfService AS PoS
-FROM ClaimsFlat_test cft
-LEFT JOIN TJR.Recruitment tjr ON cft.person_id = tjr.person_id
-WHERE YEAR(ServiceStartDate) >= 2019;
+FROM Claims cft
+  LEFT JOIN TJR.Recruitment tjr 
+    ON cft.person_id = tjr.person_id
+    WHERE YEAR(ServiceStartDate) >= 2019;
                           ''', con)
 
 
 ###############################
-
+##OG testing with excel 
 #read in data
 # data1 = pd.read_excel(r'C:\PATH\Data\TJR_data.xlsx')
 
 #data1 = pd.read_excel(r'C:\PATH\tjr_justdata.xlsx')
-####817715 rows
 
+##For downstream issues
 data = data1
-
 
 df = data.head(25)
 
@@ -129,7 +150,6 @@ data['DOB'] = data['DOB'].apply(age)
 #Rename the field
 data = data.rename({'DOB':'Patient_Age'}, axis=1)
 
-
 #####Timing END
 end_time = time.monotonic()
 print("age complete", timedelta(seconds=end_time - start_time))
@@ -145,11 +165,12 @@ sns.set(style="whitegrid", color_codes=True)
 
 data['TJR'].value_counts()
 
+##Plot it out 
 sns.countplot(x='TJR', data=data,palette='hls')
 plt.show()
 plt.savefig('count_plot')
 
-
+#see counts for balance
 count_no_sub = len(data[data['TJR']==0])
 count_sub = len(data[data['TJR']==1])
 pct_of_no_sub = count_no_sub/(count_no_sub+count_sub)
@@ -163,7 +184,7 @@ dd = data.groupby('TJR').mean()
 desc = data.groupby('TJR').describe().apply(lambda s: s.apply(lambda x: format(x, 'f')))  #max/min/etc.
 descipt = data.describe().apply(lambda s: s.apply(lambda x: format(x, 'f')))
 
-
+#view the age distrubution 
 data.Patient_Age.hist()
 plt.title('Histogram of Age')
 plt.xlabel('Age')
@@ -173,9 +194,8 @@ plt.savefig('hist_age')
 dh = data.head(25)
 
 #----------------------------------------------------------------
-
+#downstream 
 data_clean = data
-
 
 #numeric gender
 data_gnd = pd.get_dummies(data_clean['PatientGender'])
@@ -198,10 +218,8 @@ data_done['StartDay_week'] = data_done['ServiceStartDate'].dt.isocalendar().week
 # Replace True with 1 and False with 0   SQL PULL ONLY
 data_done['TJR'] = data_done['TJR'].replace({True: 1, None: 0})
 
-
-
 ##########Imputer/ OHE/ as needed
-
+#downstream 
 results = data_done
 
 res = results.head(25)
@@ -209,14 +227,10 @@ res = results.head(25)
 #results.columns
 #results.nunique()
 
-# #Dropping columns that are not needed, duplicated or problematic  
-# results = results.drop(columns=[ 'PERSON_ID', 'ClaimNr', 'ServiceStartDate', 'ServiceEndDate','ProviderSpecialtyCode', 
-#                                 'ICDVersion','FileType', 'HCPCS','DiagnosisCodePrinciple', 'DiagnosisCode1','HfClaimLineId',
-#                                 'HealthCardId','OrganizationName', 'U'])
 
-#Dropping columns that are not needed, duplicated or problematic  IN SQL PULL
-results = results.drop(columns=[ 'PERSON_ID', 'ServiceStartDate', 'HCPCS','DiagnosisCodePrincipal',
-                                'DiagnosisCode1', 'RevenueCode',  'HfClaimId'])
+
+#Dropping columns that are not needed, duplicated or problematic  
+results = results.drop(columns=[columns])
 
 #####Timing END
 end_time = time.monotonic()
@@ -237,8 +251,6 @@ def score_dataset(X_train, X_test, y_train, y_test):
 
 #results.dtypes
 
-
-
 # column_name = "RevenueCode"
 # null_values = results['RevenueCode'].isnull().sum()
 # total_values = results.shape[0]
@@ -255,7 +267,7 @@ def score_dataset(X_train, X_test, y_train, y_test):
 
 # results = results.drop(columns=['DRG', 'DrgType'])
 
-###########################################################
+########################################################### SMOTE Balancing 
 
 from imblearn.over_sampling import SMOTE
 
@@ -267,24 +279,18 @@ from imblearn.over_sampling import SMOTE
 # median = results[col].median()
 # results[col].fillna(median, inplace=True)
 
-
 #fill NULL values with 0 
 results = results.replace(np.nan,0)
 
 # results.dtypes
 
-
-#CHANGE non int columns to int columns
-#results = results.astype({'Patient_Age':'int', 'DxPrinciple':'int', 'DxCode1':'int', 'Gender':'int', 'StartDay_week':'int'})
-
-#CHANGE non int columns to int columns   SQL PULL
+#CHANGE non int columns to int columns   
 results = results.astype({'TJR':'int', 'hcpcs':'int', 'revcode':'int',  'BTaxId':'int', 'PoS':'int', 'DxCodeP':'int', 'DxCode1':'int', 'Gender':'int', 'StartDay_week':'int'})
 
 #################
 
 X = results.loc[:, results.columns != 'TJR']
 y = results.loc[:, results.columns == 'TJR']
-
 
 # os = SMOTE(random_state=56)
 # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=56)
@@ -311,7 +317,7 @@ y = results.loc[:, results.columns == 'TJR']
 # print("SMOTE complete",timedelta(seconds=end_time - start_time))
 
 
-################# RF
+################# RFC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 import pandas as pd
@@ -348,15 +354,6 @@ import numpy as np
 
 # results.columns
 
-#Excel pull
-#cols = [ 'Patient_Age' , 'DxPrinciple' ,  'DxCode1' ,  'HfClaimId' , 'BillingTaxId'  , 'StartDay_week'  ,  'hcpcs' , 'osteo_knee_dummy' ,  'RevenueCode' , 'StartDay_month'  , 'osteo_hip_dummy' , 'PlaceOfService' ,'Gender' , 'StartDay_year'  ,'esrd_dummy' ] 
-
-#SQL PULL
-# cols = [ 'Patient_Age' , 'DxCodeP' ,  'DxCode1' ,  
-#         'BTaxId'  , 'StartDay_week'  ,  'hcpcs' , 'osteo_knee_dummy' ,
-#         'revcode' , 'StartDay_month'  , 'osteo_hip_dummy' , 'PoS' ,
-#         'Gender' , 'StartDay_year'  ,'esrd_dummy' ] 
-
 #Univariate Feature Selection
 from sklearn.feature_selection import SelectKBest
 from sklearn.feature_selection import chi2
@@ -375,14 +372,10 @@ selected_feature_names = [feature_names[i] for i in range(len(feature_names)) if
 print(selected_feature_names)
 
 ##Suggested Columns from 
-#cols = ['Patient_Age', 'DxCodeP', 'DxCode1', 'BTaxId', 'StartDay_week', 'hcpcs', 'osteo_knee_dummy', 'revcode', 'osteo_hip_dummy', 'PoS'] 
-cols = ['Patient_Age', 'DxCodeP', 'DxCode1', 'BTaxId', 'StartDay_week', 'hcpcs',  'revcode',  'PoS'] 
-
-
+cols = [columns] 
 
 X=results[cols]
 y=results['TJR']
-
 
 # X=os_data_X[cols]
 # y=os_data_y['TJR']
@@ -390,7 +383,7 @@ y=results['TJR']
 #make y a list!
 y = list(y)
 
-###Data scaling
+####################Data scaling  (if needed) 
 from sklearn.preprocessing import StandardScaler
 
 # Create an instance of the StandardScaler
@@ -402,25 +395,19 @@ scaler.fit(X)
 # Transform the data
 X_scaled = scaler.transform(X)
 
-
 ###Train / test at a 70/30
 X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.3, random_state=56)
+
 
 #####Timing END
 end_time = time.monotonic()
 print("data changes finished", timedelta(seconds=end_time - start_time))
-
-
-#####Timing END
-end_time = time.monotonic()
-print("start models", timedelta(seconds=end_time - start_time))
-
 ################################################
 import statsmodels.api as sm
 
-# logit_model=sm.Logit(y,X)
-# result=logit_model.fit()
-# print(result.summary2())
+logit_model=sm.Logit(y,X)
+result=logit_model.fit()
+print(result.summary2())
 
 
 ##-----------------
@@ -428,174 +415,179 @@ from sklearn.linear_model import LogisticRegression
 from sklearn import metrics
 from sklearn.metrics import mean_absolute_error
 
+####################### LG
+logreg = LogisticRegression(random_state=56)
+logreg.fit(X_train, y_train)
 
-# logreg = LogisticRegression(random_state=56)
-# logreg.fit(X_train, y_train)
-
-# y_pred = logreg.predict(X_test)
-# print("Accuracy:", logreg.score(X_test, y_test))
-
-
-# from sklearn.metrics import confusion_matrix
-# confusion_matrix = confusion_matrix(y_test, y_pred)
-# print(confusion_matrix)
-
-# from sklearn.metrics import classification_report
-# print(classification_report(y_test, y_pred))
-
-# buildROC(y_test, y_pred)
-
-# # confusion matrix plotting
-# from sklearn.metrics import confusion_matrix
-# cm = confusion_matrix(y_test, y_pred, labels=logreg.classes_) 
-
-# # labelling
-# disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=logreg.classes_)
-# disp.plot()
-# plt.show()
+y_pred = logreg.predict(X_test)
+print("Accuracy:", logreg.score(X_test, y_test))
 
 
+from sklearn.metrics import confusion_matrix
+confusion_matrix = confusion_matrix(y_test, y_pred)
+print(confusion_matrix)
 
-# logreg1 = LogisticRegression(penalty='elasticnet', 
-#                               class_weight='balanced', 
-#                               solver='saga', 
-#                               max_iter=125,
-#                               l1_ratio=(.5),
-#                               random_state=56)
-# logreg1.fit(X_train, y_train)
+from sklearn.metrics import classification_report
+print(classification_report(y_test, y_pred))
 
-# y_pred1 = logreg1.predict(X_test)
-# print("Accuracy:", logreg1.score(X_test, y_test))
-# print("Mean Absolute Error: " + str(mean_absolute_error(y_pred1, y_test)))
+buildROC(y_test, y_pred)
 
-# from sklearn.metrics import confusion_matrix
-# confusion_matrix = confusion_matrix(y_test, y_pred1)
-# print(confusion_matrix)
+# confusion matrix plotting
+from sklearn.metrics import confusion_matrix
+cm = confusion_matrix(y_test, y_pred, labels=logreg.classes_) 
 
-# from sklearn.metrics import classification_report
-# print(classification_report(y_test, y_pred1))
+# labelling
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=logreg.classes_)
+disp.plot()
+plt.show()
+
+
+
+logreg1 = LogisticRegression(penalty='elasticnet', 
+                              class_weight='balanced', 
+                              solver='saga', 
+                              max_iter=125,
+                              l1_ratio=(.5),
+                              random_state=56)
+logreg1.fit(X_train, y_train)
+
+y_pred1 = logreg1.predict(X_test)
+print("Accuracy:", logreg1.score(X_test, y_test))
+print("Mean Absolute Error: " + str(mean_absolute_error(y_pred1, y_test)))
+
+from sklearn.metrics import confusion_matrix
+confusion_matrix = confusion_matrix(y_test, y_pred1)
+print(confusion_matrix)
+
+from sklearn.metrics import classification_report
+print(classification_report(y_test, y_pred1))
  
 
-# buildROC(y_test, y_pred1)
+buildROC(y_test, y_pred1)
 
-# # confusion matrix plotting
-# from sklearn.metrics import confusion_matrix
-# cm1 = confusion_matrix(y_test, y_pred1, labels=logreg1.classes_) 
+# confusion matrix plotting
+from sklearn.metrics import confusion_matrix
+cm1 = confusion_matrix(y_test, y_pred1, labels=logreg1.classes_) 
 
-# # labelling
-# disp1 = ConfusionMatrixDisplay(confusion_matrix=cm1, display_labels=logreg1.classes_)
-# disp1.plot()
-# plt.show()
-
-
-
-# from sklearn.model_selection import GridSearchCV
-# from sklearn.linear_model import Ridge
-
-# # Define the hyperparameter grid to search
-# param_grid = {'alpha': [0.01, 0.1, 1, 10, 100]}
-
-# # Create a logistic regression model
-# log_reg = Ridge()
-
-# # Use GridSearchCV to perform the hyperparameter tuning
-# grid_search = GridSearchCV(log_reg, param_grid, cv=5, scoring='neg_mean_squared_error')
-# grid_search.fit(X_train, y_train)
-
-# # Print the best hyperparameters found by GridSearchCV
-# print("Best hyperparameters:", grid_search.best_params_)
-
-# # Evaluate the performance of the logistic regression model with the best hyperparameters
-# best_log_reg = grid_search.best_estimator_
-# test_accuracy = best_log_reg.score(X_test, y_test)
-# print("Test accuracy:", test_accuracy)
+# labelling
+disp1 = ConfusionMatrixDisplay(confusion_matrix=cm1, display_labels=logreg1.classes_)
+disp1.plot()
+plt.show()
 
 
 
-########################################
+from sklearn.model_selection import GridSearchCV
+from sklearn.linear_model import Ridge
 
-# from sklearn.ensemble import RandomForestClassifier
-# from sklearn.metrics import mean_absolute_error
+# Define the hyperparameter grid to search
+param_grid = {'alpha': [0.01, 0.1, 1, 10, 100]}
 
-# # Initialize the model
-# rf = RandomForestClassifier( n_estimators = 200, random_state=56)
+# Create a logistic regression model
+log_reg = Ridge()
 
-# # Train the model
-# rf.fit(X_train, y_train)
+# Use GridSearchCV to perform the hyperparameter tuning
+grid_search = GridSearchCV(log_reg, param_grid, cv=5, scoring='neg_mean_squared_error')
+grid_search.fit(X_train, y_train)
 
-# # Predict on new data
-# yrf_pred = rf.predict(X_test)
-# print("Accuracy:", rf.score(X_test, y_test))
-# print("Mean Absolute Error: " + str(mean_absolute_error(yrf_pred, y_test)))
+# Print the best hyperparameters found by GridSearchCV
+print("Best hyperparameters:", grid_search.best_params_)
 
-# buildROC(y_test, yrf_pred)
+# Evaluate the performance of the logistic regression model with the best hyperparameters
+best_log_reg = grid_search.best_estimator_
+test_accuracy = best_log_reg.score(X_test, y_test)
+print("Test accuracy:", test_accuracy)
 
-# # confusion matrix plotting
-# from sklearn.metrics import confusion_matrix
-# cmrf = confusion_matrix(y_test, yrf_pred, labels=rf.classes_) 
+#####Timing END
+end_time = time.monotonic()
+print(timedelta(seconds=end_time - start_time))
+######################################## RF
 
-# # labelling
-# disp = ConfusionMatrixDisplay(confusion_matrix=cmrf, display_labels=rf.classes_)
-# disp.plot()
-# plt.show()
-########################################################XGB
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import mean_absolute_error
 
-# from xgboost import XGBClassifier
-# import xgboost as xgb
-# import numpy as np
+# Initialize the model
+rf = RandomForestClassifier( n_estimators = 200, random_state=56)
+
+# Train the model
+rf.fit(X_train, y_train)
+
+# Predict on new data
+yrf_pred = rf.predict(X_test)
+print("Accuracy:", rf.score(X_test, y_test))
+print("Mean Absolute Error: " + str(mean_absolute_error(yrf_pred, y_test)))
+
+buildROC(y_test, yrf_pred)
+
+# confusion matrix plotting
+from sklearn.metrics import confusion_matrix
+cmrf = confusion_matrix(y_test, yrf_pred, labels=rf.classes_) 
+
+# labelling
+disp = ConfusionMatrixDisplay(confusion_matrix=cmrf, display_labels=rf.classes_)
+disp.plot()
+plt.show()
+
+#####Timing END
+end_time = time.monotonic()
+print(timedelta(seconds=end_time - start_time))
+######################################################## XGB
+
+from xgboost import XGBClassifier
+import xgboost as xgb
+import numpy as np
 
 
-# xgbm = XGBClassifier(n_estimators=250,  n_jobs=2, random_state=56)
-# xgbm.fit(X_train, y_train,
-#           eval_set= [(X_train, y_train), (X_test, y_test)],
-#           early_stopping_rounds=5,
-#           verbose=False)
+xgbm = XGBClassifier(n_estimators=250,  n_jobs=2, random_state=56)
+xgbm.fit(X_train, y_train,
+          eval_set= [(X_train, y_train), (X_test, y_test)],
+          early_stopping_rounds=5,
+          verbose=False)
 
-# # Predict on new data
-# yxgb_pred = xgbm.predict(X_test)
-# print("Accuracy:", xgbm.score(X_test, y_test))
-# print("Mean Absolute Error: " + str(mean_absolute_error(yxgb_pred, y_test)))
-
-
-# buildROC(y_test, yxgb_pred)
-
-# # confusion matrix plotting
-# from sklearn.metrics import confusion_matrix
-# cmxgb = confusion_matrix(y_test, yxgb_pred, labels=xgbm.classes_) 
-
-# # labelling
-# dispxgb = ConfusionMatrixDisplay(confusion_matrix=cmxgb, display_labels=xgbm.classes_)
-# dispxgb.plot()
-# plt.show()
+# Predict on new data
+yxgb_pred = xgbm.predict(X_test)
+print("Accuracy:", xgbm.score(X_test, y_test))
+print("Mean Absolute Error: " + str(mean_absolute_error(yxgb_pred, y_test)))
 
 
-# #####Timing END
-# end_time = time.monotonic()
-# print(timedelta(seconds=end_time - start_time))
+buildROC(y_test, yxgb_pred)
+
+# confusion matrix plotting
+from sklearn.metrics import confusion_matrix
+cmxgb = confusion_matrix(y_test, yxgb_pred, labels=xgbm.classes_) 
+
+# labelling
+dispxgb = ConfusionMatrixDisplay(confusion_matrix=cmxgb, display_labels=xgbm.classes_)
+dispxgb.plot()
+plt.show()
+
+
+#####Timing END
+end_time = time.monotonic()
+print(timedelta(seconds=end_time - start_time))
 
 ###########################################  GNB
 
-# from sklearn.naive_bayes import GaussianNB
+from sklearn.naive_bayes import GaussianNB
 
 
-# # Train the Naive Bayes model
-# gnb = GaussianNB()
-# gnb.fit(X_train, y_train)
+# Train the Naive Bayes model
+gnb = GaussianNB()
+gnb.fit(X_train, y_train)
 
-# # Make predictions on the test set
-# ygnb_pred = gnb.predict(X_test)
-# print("Accuracy:", gnb.score(X_test, y_test))
+# Make predictions on the test set
+ygnb_pred = gnb.predict(X_test)
+print("Accuracy:", gnb.score(X_test, y_test))
 
-# buildROC(y_test, ygnb_pred)
+buildROC(y_test, ygnb_pred)
 
-# # confusion matrix plotting
-# from sklearn.metrics import confusion_matrix
-# cmg = confusion_matrix(y_test, ygnb_pred, labels=gnb.classes_) 
+# confusion matrix plotting
+from sklearn.metrics import confusion_matrix
+cmg = confusion_matrix(y_test, ygnb_pred, labels=gnb.classes_) 
 
-# # labelling
-# dispgnb = ConfusionMatrixDisplay(confusion_matrix=cmg, display_labels=gnb.classes_)
-# dispgnb.plot()
-# plt.show()
+# labelling
+dispgnb = ConfusionMatrixDisplay(confusion_matrix=cmg, display_labels=gnb.classes_)
+dispgnb.plot()
+plt.show()
 
 ##########################################  KNN
 
@@ -622,107 +614,107 @@ disp.plot()
 plt.show()
 
 
-# from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import RandomizedSearchCV
 
-# # Define the hyperparameters and their respective ranges
-# param_dist = {'n_neighbors': np.arange(3, 12),
-#               'algorithm': ['auto'], 
-#               'leaf_size': [3, 15], 
-#               'weights': ['uniform', 'distance'],
-#               'p': [1, 2]}
+# Define the hyperparameters and their respective ranges
+param_dist = {'n_neighbors': np.arange(3, 12),
+              'algorithm': ['auto'], 
+              'leaf_size': [3, 15], 
+              'weights': ['uniform', 'distance'],
+              'p': [1, 2]}
 
-# # Initialize the KNN model
-# knn = KNeighborsClassifier()
+# Initialize the KNN model
+knn = KNeighborsClassifier()
 
-# # Perform Random Search
-# random_search = RandomizedSearchCV(knn, param_distributions=param_dist, n_iter=100, cv=5)
-# random_search.fit(X_train, y_train)
+# Perform Random Search
+random_search = RandomizedSearchCV(knn, param_distributions=param_dist, n_iter=100, cv=5)
+random_search.fit(X_train, y_train)
 
-# # Print the best hyperparameters
-# # print("Best hyperparameters: ", random_search.best_params_)
-
-
-
-# from sklearn.neighbors import KNeighborsClassifier
-# from sklearn.model_selection import cross_val_score
-# ###BEST model parameters
-# # set the number of nearest neighbors to consider
-# n_neighbors = 3
-# # set the weighting method to be used
-# weights = 'distance'
-# # set the power parameter 
-# p = 1
-# # set the algorithm used to find the nearest neighbors
-# algorithm = 'auto'
-# # set the size of the leaf in the k-d tree algorithm
-# leaf_size = 15
-
-# # create a KNN classifier with BEST parameters
-# best_knn = KNeighborsClassifier(n_neighbors=n_neighbors,
-#                                 weights=weights,
-#                                 algorithm=algorithm,
-#                                 leaf_size=leaf_size,
-#                                 p = p)
-
-# best_knn.fit(X_train, y_train)
-
-# # Make predictions on the test set
-# ybknn_pred = best_knn.predict(X_test)
-# print("Accuracy:", best_knn.score(X_test, y_test))
+##Print the best hyperparameters
+print("Best hyperparameters: ", random_search.best_params_)
 
 
-# scores = cross_val_score(best_knn, X, y, cv=5)
-# print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() *2))
+
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.model_selection import cross_val_score
+###BEST model parameters
+# set the number of nearest neighbors to consider
+n_neighbors = 3
+# set the weighting method to be used
+weights = 'distance'
+# set the power parameter 
+p = 1
+# set the algorithm used to find the nearest neighbors
+algorithm = 'auto'
+# set the size of the leaf in the k-d tree algorithm
+leaf_size = 15
+
+# create a KNN classifier with BEST parameters
+best_knn = KNeighborsClassifier(n_neighbors=n_neighbors,
+                                weights=weights,
+                                algorithm=algorithm,
+                                leaf_size=leaf_size,
+                                p = p)
+
+best_knn.fit(X_train, y_train)
+
+# Make predictions on the test set
+ybknn_pred = best_knn.predict(X_test)
+print("Accuracy:", best_knn.score(X_test, y_test))
 
 
-# best_knn.score
-
-# buildROC(y_test, ybknn_pred)
-
-# buildROC(y_test, best_knn.predict(X_test))
+scores = cross_val_score(best_knn, X, y, cv=5)
+print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() *2))
 
 
-# # confusion matrix plotting
-# from sklearn.metrics import confusion_matrix
-# cm = confusion_matrix(y_test, ybknn_pred, labels=best_knn.classes_) 
+best_knn.score
 
-# # labelling
-# disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=best_knn.classes_)
-# disp.plot()
-# plt.show()
+buildROC(y_test, ybknn_pred)
 
-# #####Timing END
-# end_time = time.monotonic()
-# print(timedelta(seconds=end_time - start_time))
+buildROC(y_test, best_knn.predict(X_test))
+
+
+# confusion matrix plotting
+from sklearn.metrics import confusion_matrix
+cm = confusion_matrix(y_test, ybknn_pred, labels=best_knn.classes_) 
+
+# labelling
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=best_knn.classes_)
+disp.plot()
+plt.show()
+
+#####Timing END
+end_time = time.monotonic()
+print(timedelta(seconds=end_time - start_time))
 
 
 
 ###################################
-# from sklearn.svm import SVC
-# from sklearn.metrics import classification_report
+from sklearn.svm import SVC
+from sklearn.metrics import classification_report
 
 
-# svm = SVC(kernel='linear', C=1, random_state=56) 
-# svm.fit(X_train, y_train)
+svm = SVC(kernel='linear', C=1, random_state=56) 
+svm.fit(X_train, y_train)
 
-# y_pred = svm.predict(X_test)
-
-
-# # confusion matrix plotting
-# from sklearn.metrics import confusion_matrix
-# cmsvm = confusion_matrix(y_test, y_pred, labels=svm.classes_) 
-
-# # labelling
-# disp = ConfusionMatrixDisplay(confusion_matrix=cmsvm, display_labels=svm.classes_)
-# disp.plot()
-# plt.show()
+y_pred = svm.predict(X_test)
 
 
-# print(confusion_matrix(y_test, y_pred))
-# print(classification_report(y_test,y_pred))
+# confusion matrix plotting
+from sklearn.metrics import confusion_matrix
+cmsvm = confusion_matrix(y_test, y_pred, labels=svm.classes_) 
+
+# labelling
+disp = ConfusionMatrixDisplay(confusion_matrix=cmsvm, display_labels=svm.classes_)
+disp.plot()
+plt.show()
 
 
-# #####Timing END
+print(confusion_matrix(y_test, y_pred))
+print(classification_report(y_test,y_pred))
+
+
+#####Timing END
 end_time = time.monotonic()
 print("code done", timedelta(seconds=end_time - start_time))
 
