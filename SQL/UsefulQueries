@@ -135,6 +135,7 @@ num
 5
 ---Task: Write an SQL query to find the missing numbers in the sequence from the minimum value to the maximum value of the column.
 
+---POSTGRESQL
 WITH NumberRange AS (
     SELECT generate_series(MIN(num), MAX(num)) AS num
     FROM Numbers
@@ -142,6 +143,17 @@ WITH NumberRange AS (
 SELECT num
 FROM NumberRange
 WHERE num NOT IN (SELECT num FROM Numbers);
+
+---recursive CTE
+WITH RECURSIVE NumberRange AS (
+    SELECT 1 AS num
+    UNION ALL
+    SELECT num + 1
+    FROM NumberRange
+    WHERE num < 10
+)
+SELECT num FROM NumberRange;
+
 
 
 --Question 3: Median of Numbers
@@ -158,6 +170,21 @@ num
 
 SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY num) AS median
 FROM Numbers;
+
+---SQL server/ oracle
+SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY num) 
+       OVER () AS median  --requires and OVER () 
+FROM Numbers;
+
+---alt for no support 
+WITH NumberedRows AS (
+    SELECT num, ROW_NUMBER() OVER (ORDER BY num) AS row_num,
+           COUNT(*) OVER () AS total_count
+    FROM Numbers
+)
+SELECT AVG(num) AS median
+FROM NumberedRows
+WHERE row_num IN (FLOOR((total_count + 1) / 2.0), CEIL((total_count + 1) / 2.0));
 
 
 ---Question 4: Find Consecutive Numbers
