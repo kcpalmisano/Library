@@ -103,3 +103,125 @@ ON s.schema_id = t.schema_id
 WHERE c.name LIKE '%DiagnosisRelatedGroupAssigned%'
 ORDER BY TableName, ColumnName, SchemaName;
 
+
+---Question 1: Find Duplicates
+--Table: Numbers
+
+num
+1
+2
+2
+3
+4
+4
+4
+--Task: Write an SQL query to find all numbers that appear more than once in the table, along with their counts.
+
+SELECT num, COUNT(*) AS count
+FROM Numbers
+GROUP BY num
+HAVING COUNT(*) > 1;
+
+
+
+---Question 2: Missing Numbers
+--Table: Numbers
+
+
+num
+1
+2
+4
+5
+---Task: Write an SQL query to find the missing numbers in the sequence from the minimum value to the maximum value of the column.
+
+WITH NumberRange AS (
+    SELECT generate_series(MIN(num), MAX(num)) AS num
+    FROM Numbers
+)
+SELECT num
+FROM NumberRange
+WHERE num NOT IN (SELECT num FROM Numbers);
+
+
+--Question 3: Median of Numbers
+
+num
+3
+1
+4
+1
+5
+9
+--Task: Write an SQL query to calculate the median value of the column.
+
+
+SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY num) AS median
+FROM Numbers;
+
+
+---Question 4: Find Consecutive Numbers
+
+num
+1
+2
+3
+5
+6
+8
+--Task: Write an SQL query to find all sets of consecutive numbers.
+
+SELECT DISTINCT a.num AS start_num, b.num AS next_num
+FROM Numbers a
+JOIN Numbers b
+ON a.num + 1 = b.num
+ORDER BY a.num;
+
+---Question 5: Rank the Numbers
+
+num
+20
+10
+30
+40
+50
+--Task: Write an SQL query to rank the numbers in ascending order.
+
+SELECT num, RANK() OVER (ORDER BY num ASC) AS Rank
+FROM Numbers
+ORDER BY Rank ASC;
+
+
+--Question 6: Find Single Occurrence Numbers
+
+num
+1
+2
+2
+3
+3
+3
+4
+--Task: Write an SQL query to find all numbers that appear only once in the table.
+
+SELECT num
+FROM Numbers
+GROUP BY num
+HAVING COUNT(*) = 1;
+
+
+--Question 7: Sum of Even Numbers
+
+num
+1
+2
+3
+4
+5
+--Task: Write an SQL query to calculate the sum of all even numbers.
+
+SELECT SUM(num)
+FROM Numbers
+WHERE num % 2 = 0;
+
+
