@@ -270,3 +270,68 @@ FROM Numbers
 WHERE num % 2 = 0;
 
 
+---Find the Second Highest Number
+
+num
+10
+20
+30
+20
+40
+--Task: Write a query to find the second-highest number in the table.
+
+
+SELECT MAX(num) AS second_highest
+FROM Numbers
+WHERE num < (SELECT MAX(num) FROM Numbers);
+
+--alt
+SELECT TOP 1 num AS second_highest
+FROM (
+    SELECT DISTINCT num
+    FROM Numbers
+) t
+ORDER BY num DESC
+OFFSET 1 ROW;
+
+----Calculate Running Total
+
+num
+10
+20
+30
+40
+50
+--Task: Write a query to calculate the running total of the numbers (e.g., cumulative sum as you go down the rows), ordered by the values in the num column.
+
+SELECT 
+    num,
+    SUM(num) OVER (ORDER BY num) AS running_total
+FROM Numbers
+ORDER BY num;
+
+
+-----Find the Most Frequent Number
+
+num
+10
+20
+10
+30
+10
+20
+--Task: Write a query to find the number(s) that appear the most frequently in the table and their count.
+
+
+WITH Frequency AS (
+    SELECT 
+        num, 
+        COUNT(*) AS frequency
+    FROM Numbers
+    GROUP BY num
+)
+SELECT num, frequency
+FROM Frequency
+WHERE frequency = (SELECT MAX(frequency) FROM Frequency);
+
+
