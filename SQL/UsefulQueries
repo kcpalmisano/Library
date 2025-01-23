@@ -186,6 +186,24 @@ SELECT AVG(num) AS median
 FROM NumberedRows
 WHERE row_num IN (FLOOR((total_count + 1) / 2.0), CEIL((total_count + 1) / 2.0));
 
+--MS SQL Server
+WITH OrderedNumbers AS (
+    SELECT 
+        num,
+        ROW_NUMBER() OVER (ORDER BY num) AS row_num,
+        COUNT(*) OVER () AS total_count
+    FROM Numbers
+)
+SELECT 
+    CASE 
+        WHEN total_count % 2 = 1 THEN -- Odd count, take the middle value
+            CAST(MAX(CASE WHEN row_num = (total_count + 1) / 2 THEN num END) AS FLOAT)
+        ELSE -- Even count, take the average of the two middle values
+            CAST(AVG(CASE WHEN row_num IN (total_count / 2, total_count / 2 + 1) THEN num END) AS FLOAT)
+    END AS median
+FROM OrderedNumbers;
+
+
 
 ---Question 4: Find Consecutive Numbers
 
