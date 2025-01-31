@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <title>Portfolio</title>
+    <link rel="stylesheet" href="/static/style.css">
+	<meta name="description" content="Casey Palmisano's personal website showcasing data science projects and expertise.">
+    <meta name="author" content="Casey Palmisano">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <header>
+        <div class="menu-toggle" onclick="toggleMenu()">☰</div>
+		<nav id="navbar">
+            <a href="/">Home</a>
+            <a href="/about">About</a>
+            <a href="/portfolio">Portfolio</a>
+            <a href="/contact">Contact</a>
+        </nav>
+    </header>
+    <section class="portfolio">
+        <h1>My Portfolio</h1>
+        <p>Here are some of the projects I’ve worked on:</p>
+         <div class="project-list">
+            <div class="project-item">
+                <img src="/static/images/clustermap.jpg" alt="clustermap">
+                <h2>Architecture Descion Making Predictor</h2>
+                <p>This was a project where my team was architecting a data base where we did not
+				have a data dictionary for all the data. Because of this, we did not know how some of it was
+				related or should be architected. I built a model that would allow us to input the fields, 
+				and then they would be grouped accordingly based on the model.</p>
+                <a href="https://github.com/kcpalmisano/Library/tree/main/Models/Decision%20Model" target="_blank">View on GitHub</a>
+            </div>
+            <div class="project-item">
+                <img src="/static/images/NYC_clusterBus.jpg" alt="NYC_clusterBus">
+				<img src="/static/images/cluster.jpg" alt="cluster">
+                <h2>MTA Clustering Model</h2>
+                <p>This is a clustering model that is not a KNN clustering model for a client facing app. We had multiple fixed locations
+				that we wanted to group a population by their geographic home and work. Then determine which fixed
+				location is the closest to that particular geolocation. I then took it another step and overlaid 
+				MTA bus/train/and subway stops to show best routes. I am working on adding specialities for the various
+				fixed locations so we can then provide information for the closest specialty location based on a clients need.</p>
+                <a href="https://github.com/kcpalmisano/Library/tree/main/Models/Cluster" target="_blank">View on GitHub</a>
+            </div>
+            <div class="project-item">
+                <h2>Text Extraction </h2>
+                <p>Approaching various methods to extract text from a PDF document, translate it, and then 
+				be able to provide that text for a CRM update. This project is designed for birth and marriage certificates,
+				but can go into various applications. I am exploring a way to use it to track attendance of classes for example.</p>
+                <a href="https://github.com/kcpalmisano/Library/tree/main/Models/Text_Extraction" target="_blank">View on GitHub</a>
+            </div>
+			<div class="project-item">
+    <h3>This Website: A Masterpiece in Snark and Code</h3>
+    <p>
+        Built using <strong>Python</strong>, <strong>Flask</strong>, and a touch of sarcasm, this website is my personal playground.
+        I coded the entire thing from scratch to showcase my projects and skills. 
+        Yes, even the <i>"Back-to-Top"</i> button was carefully crafted (okay, with a little help from Google and ChatGPT).
+    </p>
+    <p>
+        Features include:
+        <ul>
+            <li>Dynamic sections powered by Flask</li>
+            <li>Smooth scroll, dark mode, and custom animations</li>
+            <li>Snarky commentary and visually appealing components</li>
+        </ul>
+    </p>
+    <p><strong>Languages & Tools:</strong> Python, Flask, HTML, CSS, JavaScript, Font Awesome</p>
+    <a href="/" target="_blank" class="project-link">View Live</a>
+</div>
+        </div>
+    </section>
+    <footer class="footer">
+    <p>&copy; 2024 My Website. All rights reserved.</p>
+    <div class="social-icons">
+        <a href="https://github.com/kcpalmisano" target="_blank" aria-label="GitHub">
+            <i class="fab fa-github"></i>
+        </a>
+        <a href="https://www.linkedin.com/in/casey-palmisano-77463361/" target="_blank" aria-label="LinkedIn">
+            <i class="fab fa-linkedin"></i>
+        </a>
+    </div>
+	<button id="back-to-top" class="back-to-top" aria-label="Back to Top">&uarr;</button>
+</footer>
+
+<script>
+    // Toggle menu functionality
+    function toggleMenu() {
+        const navbar = document.getElementById('navbar');
+        navbar.classList.toggle('show');
+    }
+
+    // Back to Top button functionality
+    const backToTopButton = document.getElementById('back-to-top');
+
+    window.addEventListener('scroll', () => {
+        // Show the button when scrolled down by 300px
+        if (window.scrollY > 300) {
+            backToTopButton.classList.add('show-button');
+        } else {
+            backToTopButton.classList.remove('show-button');
+        }
+    });
+
+    backToTopButton.addEventListener('click', () => {
+        // Smooth scroll to the top
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+<script>
+function toggleMenu() {
+    const navbar = document.getElementById('navbar');
+    navbar.classList.toggle('show');
+}
+</script>
+</body>
+</html>
