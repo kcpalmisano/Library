@@ -104,6 +104,23 @@ WHERE c.name LIKE '%DiagnosisRelatedGroupAssigned%'
 ORDER BY TableName, ColumnName, SchemaName;
 
 
+ 
+
+--Find a table across various DBs 
+EXEC sp_MSforeachdb ' 
+USE [?]; 
+SELECT ''?'' AS DatabaseName, name AS TableName, schema_name(schema_id) AS SchemaName 
+FROM sys.tables 
+WHERE name LIKE ''%claimsdatav2%''; 
+'; 
+
+
+---find a table by name 
+SELECT TABLE_NAME, TABLE_SCHEMA 
+FROM INFORMATION_SCHEMA.TABLES 
+WHERE TABLE_NAME LIKE '%claimsv2%'; 
+
+
 ---Question 1: Find Duplicates
 --Table: Numbers
 
