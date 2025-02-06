@@ -1,0 +1,21 @@
+
+
+import win32com.client as win32
+
+outlook = win32.Dispatch('outlook.application')
+mail = outlook.CreateItem(0)
+mail.To = 'cpalmisano@mail.com' 
+
+mail.Subject = 'Upload Optum file'
+mail.Body = """
+Please upload Optum file from folder
+"""
+##mail.HTMLBody = '<h2>HTML Message body</h2>' ##input message in here
+
+## To attach a file to the email 
+##attachment  = "Path to the attachment"
+##mail.Attachments.Add(attachment)
+
+mail.Send()
+
+
