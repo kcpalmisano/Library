@@ -6,8 +6,8 @@ Created on Mon Jan 27 17:29:42 2025
 @author: casey
 
 
-Attached is a csv file containing data on utilization and price/hour of GPUs 
-in our fleet. 
+Provided is a three column csv file containing data on utilization and price/hour 
+of GPUs with their associated names.  
 
 Where:
 ● Utilization is defined as # GPUs reserved/# total GPUs
@@ -19,18 +19,6 @@ with different prices.
 Your goal is to build a model to predict the best price per GPU given 
 fluctuations in supply and
 demand. Keep in mind that the target utilization value is 75%. 
-
-It is up to your discretion what
-rate prices can be changed: daily, weekly, monthly etc. 
-Select a KPI you are optimizing, and
-explain why you picked it.
-You are welcome to use Python or R for your analysis, whichever 
-you are more comfortable
-with.
-
-Include your code and any descriptions or explanations necessary 
-for a viewer to understand
-your thought process.
 
 """
 
@@ -57,7 +45,7 @@ import time
 from datetime import timedelta
 current_time = datetime.now()
 start_time = time.monotonic()
-print("starting RunPod py script", current_time)
+print("starting py script", current_time)
 
 #%% Functions 
 ###! Functions and wrappers
@@ -203,9 +191,8 @@ df_cleaned.columns
 #%% Data load
 #!!!
 #### Load the dataset
-file_path = "/Users/casey/Desktop/Data/gpu_pricing_utilization (1) (1).csv"  ##home
+file_path = "/Users/ path /gpu_pricing_utilization.csv"  ##home
 
-#file_path = "C:/Users/cpalmisano/OneDrive - Building Service 32BJ Benefit Funds/Desktop/Data/gpu_pricing_utilization (1) (1).csv" ##work
 
 try:
     df = pd.read_csv(file_path)
@@ -807,7 +794,7 @@ print(f"Number of GPUs below target utilization: {len(under_target)}")
 print(under_target[['gpu_type', 'hourly_price', 'best_price', 'predicted_utilization']])
 
 '''
-      gpu_type  hourly_price  best_price  predicted_utilization
+      le_gpu_type  hourly_price  best_price  predicted_utilization
 0            0          0.76    0.736735               0.767694
 1            0          0.76    1.292000               0.778247
 2            0          0.76    0.736735               0.787524
@@ -822,7 +809,7 @@ print(under_target[['gpu_type', 'hourly_price', 'best_price', 'predicted_utiliza
 
 Number of GPUs below target utilization: 625
 
-      gpu_type  hourly_price  best_price  predicted_utilization
+      le_gpu_type  hourly_price  best_price  predicted_utilization
 93           1          3.41        3.41               0.492086
 94           1          3.41        3.41               0.494187
 95           1          3.41        3.41               0.626456
@@ -1033,8 +1020,8 @@ Ensured revenue did not decrease significantly.
 A. Model Performance
 Model	            RMSE (root mean squared error)
 Linear Regression	0.043
-Random Forest	    0.023
-XGBoost	            0.015
+Random Forest	    	0.023
+XGBoost	            	0.015
 
 XGBoost outperformed others, making it our final choice.
 Residual analysis shows the model slightly underestimates high-utilization GPUs.
@@ -1047,7 +1034,6 @@ RTX 3090	$2.80	$2.95	0.75	0.70	Monthly
 
 Key Observations:
 
-Most GPUs reach or exceed 75% utilization after price adjustments.
 V100 and similar high-end GPUs require daily adjustments due to high volatility.
 Some GPUs (RTX 3090) needed higher prices to balance supply-demand.
 
@@ -1058,7 +1044,6 @@ A100	$587K	$603K	+2.7%
 V100	$1.5M	$1.55M	+3.3%
 RTX 3090	$920K	$930K	+1.1%
 Revenue increased across all GPUs after implementing dynamic pricing.
-Utilization accuracy improved to 88% of GPUs hitting 75%+ utilization.
 
 4. Optimization Strategy
 A. Price Adjustment Strategy
