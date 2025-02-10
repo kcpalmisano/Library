@@ -1,0 +1,65 @@
+
+#%%libraries
+import yfinance as yf
+import pandas as pd
+import matplotlib.pyplot as plt
+from pmdarima import auto_arima
+import os
+
+#%% FUNCTIONS
+
+## Function to pull stock data
+def get_stock_data(ticker, period="1y"):
+    stock = yf.Ticker(ticker)
+    data = stock.history(period=period)
+    if data.empty:
+        print(f"No data found for ticker symbol: {ticker}")
+        return None
+    return data['Close']
+
+## Forecast function
+def forecast_stock(data, steps=90):
+    model = auto_arima(data, seasonal=True, m=5, trace=True, error_action='ignore', suppress_warnings=True)
+    forecast, conf_int = model.predict(n_periods=steps, return_conf_int=True)
+    return forecast, conf_int
+
+## Visualization function
+def plot_forecast(data, forecast, conf_int, steps, ticker):
+    plt.figure(figsize=(14, 7))
+
+    ## Plot historical data
+    plt.plot(data.index, data, label="Historical Data", color="blue")
+
+    ## Plot forecasted data
+    forecast_index = pd.date_range(data.index[-1], periods=steps + 1, freq='B')[1:]
+    plt.plot(forecast_index, forecast, label="Forecast", color="green")
+
+    ## Plot confidence intervals
+    plt.fill_between(forecast_index, conf_int[:, 0], conf_int[:, 1], color='gray', alpha=0.3, label="Confidence Interval")
+
+    plt.title(f"{ticker} Stock Price Forecast")
+    plt.xlabel("Date")
+    plt.ylabel("Price")
+    plt.legend(loc="upper left")
+    plt.grid(True)
+
+    plt.show()
+
+#%% Main function
+def main():
+    ticker = input("Enter the stock ticker symbol (e.g., AAPL, TSLA): ").upper()
+    steps = int(input("Enter the forecast period in business days (5 to 90): "))
+
+    ## Get stock data
+    historical_data = get_stock_data(ticker)
+    if historical_data is None:
+        return
+
+    ## Generate forecast
+    forecasted_data, confidence_intervals = forecast_stock(historical_data, steps=steps)
+
+    ## Plot the results
+    plot_forecast(historical_data, forecasted_data, confidence_intervals, steps, ticker)
+
+if __name__ == "__main__":
+    main()
