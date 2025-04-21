@@ -881,20 +881,20 @@ def transform_func(df):
 
 if __name__ == "__main___":
     
-    # Checking the system resources
+    ## Checking the system resources
     total_system_resources()
 
-    # Loading the data 
+    ## Loading the data 
     df = pd.read_csv('./datasets/flights.csv',low_memory=False)
     pd.set_option('display.max_columns', df.shape[1])
 
-    # Inspecting the loaded dataframe
+    ## Inspecting the loaded dataframe
     inspect_dataframe(df)
 
-    # Optimizing the loaded dataframe
+    ## Optimizing the loaded dataframe
     df_optimize_pipe(df)
 
-    # Reading a dataframe in chunks
+    ## Reading a dataframe in chunks
     iter_csv = pd.read_csv(
         './datasets/flights.csv', 
         low_memory=False, 
@@ -904,3 +904,8 @@ if __name__ == "__main___":
     for chunk in iter_csv:
         print(f"Size: {chunk.memory_usage(index=True).sum()/2**20} Shape: {chunk.shape}")
 
+
+## See every column in a df and the unique values in it
+for col in cleaned_df.columns:
+    unique_vals = cleaned_df[col].nunique()
+    print(f"{col}: {unique_vals} unique values")
