@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Prediction Result</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/stock-predictor">Stock Predictor</a>
+        </nav>
+    </header>
+    <section>
+        <h1>Prediction for {{ ticker }}</h1>
+        <img src="{{ image_path }}" alt="Stock Forecast Plot">
+        <a href="/stock-predictor" class="button">Predict Another Stock</a>
+    </section>
+</body>
+</html>
