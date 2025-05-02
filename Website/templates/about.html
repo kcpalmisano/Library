@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <title>About</title>
+    <link rel="stylesheet" href="/static/style.css">
+	<meta name="description" content="Casey Palmisano's personal website showcasing data science projects and expertise.">
+    <meta name="author" content="Casey Palmisano">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <header>
+        <div class="menu-toggle" onclick="toggleMenu()">☰</div>
+        <nav id="navbar">
+            <a href="/">Home</a>
+            <a href="/about">About</a>
+            <a href="/portfolio">Portfolio</a>
+            <a href="/contact">Contact</a>
+        </nav>
+    </header>
+
+    <section class="about">
+        <h1>About Me</h1>
+
+        <div class="intro">
+            <p>Hello! I'm Casey, and I love building awesome things with Python & SQL. I am always looking to build fascinating data science models and love when a well-built ETL pipeline does its job.</p>
+            <img src="/static/images/1602713311277.jpg" alt="Casey headshot" class="centered-image">
+        
+		</div>
+
+        <!-- Professional Background Section -->
+        <section class="background">
+            <h2>Professional Background</h2>
+            <p>
+                I have extensive experience in data engineering and data science, with a strong focus on ETL pipelines, data visualization, and predictive modeling. 
+                I thrive on solving complex data challenges and turning raw data into actionable insights.
+            </p>
+            <p>Here are some of the key areas I've worked on:</p>
+            <ul>
+            <section id="data-science-expertise">
+    <h2>Data Science Expertise</h2>
+    <ul>
+        <li><strong>Predictive Models:</strong> Developed models to forecast key business outcomes, including demand, resource allocation, and customer attrition.</li>
+        <li><strong>Lead Scoring:</strong> Built models to prioritize prospects, improving sales conversion rates by 20-25%.</li>
+        <li><strong>Attrition Analysis:</strong> Designed models that reduced customer churn by 15%, supporting customer retention strategies.</li>
+        <li><strong>Clustering:</strong> Implemented clustering algorithms for customer segmentation and location analysis, driving targeted marketing and personalization.</li>
+    </ul>
+</section>
+
+<section id="data-engineering-and-pipelines">
+    <h2>Data Engineering and Pipelines</h2>
+    <ul>
+        <li><strong>Production Pipelines:</strong> Automated scalable ML pipelines using Airflow for reliability and monitoring.</li>
+        <li><strong>Workflow Orchestration:</strong> Built automated data workflows with tools like Airflow, improving pipeline efficiency.</li>
+        <li><strong>ETL and Data Integration:</strong> Developed ETL pipelines to centralize data from multiple sources, enhancing data accessibility and quality.</li>
+        <li><strong>Architecture for Prediction Models:</strong> Designed scalable architectures to integrate machine learning models into complex systems and data lakes.</li>
+    </ul>
+</section>
+
+<section id="data-management-and-infrastructure">
+    <h2>Data Management and Infrastructure</h2>
+    <ul>
+        <li><strong>Unstructured Data Handling:</strong> Developed data architectures to analyze and derive insights from unstructured data.</li>
+        <li><strong>AWS & Data Lakes:</strong> Utilized AWS Athena and data lakes to streamline data access and enhance analytical workflows.</li>
+        <li><strong>SQL Expertise:</strong> Created complex SQL queries for data manipulation and analysis of large datasets.</li>
+    </ul>
+</section>
+
+<section id="testing-and-optimization">
+    <h2>Testing and Optimization</h2>
+    <ul>
+        <li><strong>A/B Testing:</strong> Designed and executed experimentation frameworks to validate model performance and optimize decision-making.</li>
+        <li><strong>Unit Testing:</strong> Integrated unit testing frameworks to ensure production model reliability and accuracy.</li>
+    </ul>
+</section>
+
+<section id="collaboration-and-insights">
+    <h2>Collaboration and Insights</h2>
+    <ul>
+        <li><strong>Data Exploration:</strong> Conducted EDA to uncover trends and inform feature engineering and model development.</li>
+        <li><strong>Data Visualization:</strong> Created interactive dashboards using Python and Tableau to provide KPI-driven insights for strategic decision-making.</li>
+        <li><strong>Cross-Functional Collaboration:</strong> Worked closely with BI, sales, and marketing teams to define data needs and deliver actionable insights.</li>
+    </ul>
+</section>
+
+        <!-- Skills Section -->
+        <section class="skills">
+            <h2>Technical Skills</h2>
+            <div class="skill-list">
+                <div>
+                    <h3>Programming Languages</h3>
+                    <p>Python, SQL, R, JavaScript, Terraform</p>
+                </div>
+                <div>
+                    <h3>Data Tools & Platforms</h3>
+                    <p>Databricks, DBT, Tableau, Alteryx, Apache Spark, SQL</p>
+                </div>
+                <div>
+                    <h3>Cloud Platforms</h3>
+                    <p>Azure, AWS</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Personal Life Section -->
+        <section class="personal-life">
+            <h2>Outside of Work</h2>
+            <p>Outside of tech, I stay active by biking regularly and participating in CrossFit. I also enjoy spending time with my family, cooking, exploring new places, and finding creative ways to stay fit and healthy while enjoying great food.</p>
+    <div class="image-row">
+        <div class="image-container">
+            <img src="/static/images/rmu.jpg" alt="Casey Muscle Up" class="clickable-image">
+        </div>
+        <div class="image-container">
+            <img src="/static/images/coach.jpg" alt="Casey EVF Coaching" class="clickable-image">
+        </div>
+        <div class="image-container">
+            <img src="/static/images/wallballs.jpg" alt="Casey Suffering" class="clickable-image">
+        </div>
+    </div>
+</section>
+
+<!-- Lightbox Modal -->
+<div id="lightbox" class="lightbox">
+    <span class="close">&times;</span>
+    <img class="lightbox-content" id="expanded-image" alt="Expanded Image">
+</div>
+
+<script>
+    // Select elements
+    const images = document.querySelectorAll(".clickable-image");
+    const lightbox = document.getElementById("lightbox");
+    const expandedImage = document.getElementById("expanded-image");
+    const closeBtn = document.querySelector(".close");
+
+    // Open the lightbox on image click
+    images.forEach(image => {
+        image.addEventListener("click", () => {
+            expandedImage.src = image.src;
+            lightbox.style.display = "flex";
+        });
+    });
+
+    // Close the lightbox on close button click
+    closeBtn.addEventListener("click", () => {
+        lightbox.style.display = "none";
+    });
+
+    // Close the lightbox when clicking outside the image
+    lightbox.addEventListener("click", (e) => {
+        if (e.target !== expandedImage) {
+            lightbox.style.display = "none";
+        }
+    });
+	
+</script>
+<button id="back-to-top" class="back-to-top" aria-label="Back to Top">&uarr;</button>
+<footer class="footer">
+    <p>&copy; 2024 My Website. All rights reserved.</p>
+    <div class="social-icons">
+        <a href="https://github.com/kcpalmisano" target="_blank" aria-label="GitHub">
+            <i class="fab fa-github"></i>
+        </a>
+        <a href="https://www.linkedin.com/in/casey-palmisano-77463361/" target="_blank" aria-label="LinkedIn">
+            <i class="fab fa-linkedin"></i>
+        </a>
+    </div>
+</footer>
+
+<script>
+    // Toggle menu functionality
+    function toggleMenu() {
+        const navbar = document.getElementById('navbar');
+        navbar.classList.toggle('show');
+    }
+
+    // Back to Top button functionality
+    const backToTopButton = document.getElementById('back-to-top');
+
+    window.addEventListener('scroll', () => {
+        // Show the button when scrolled down by 300px
+        if (window.scrollY > 300) {
+            backToTopButton.classList.add('show-button');
+        } else {
+            backToTopButton.classList.remove('show-button');
+        }
+    });
+
+    backToTopButton.addEventListener('click', () => {
+        // Smooth scroll to the top
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+</script>
+</body>
+</html>
