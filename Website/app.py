@@ -8,7 +8,7 @@ from pmdarima import auto_arima
 from flask import Flask, render_template, request
 from flask_mail import Mail, Message
 
-E# Set up logging and Flask app
+## Set up logging and Flask app
 logging.basicConfig(level=logging.DEBUG)
 app = Flask(__name__)
 
@@ -26,7 +26,7 @@ def home():
     app.logger.debug("Rendering Home Page")
     return render_template('index.html')
 
-E# About route
+## About route
 @app.route('/about')
 def about():
     app.logger.debug("Rendering About Page")
