@@ -720,8 +720,8 @@ scatter = sns.scatterplot(x=x, y=y, hue=z, palette='viridis', alpha=0.7, edgecol
 plt.plot([0, 100], [0, 100], linestyle='--', color='gray')
 
 plt.title('Age Comparison with Density Overlay')
-plt.xlabel('Data Axle Ages')
-plt.ylabel('Equinox Ages')
+plt.xlabel('DAX Ages')
+plt.ylabel('EQX Ages')
 #plt.colorbar(label='Density')
 plt.grid(True)
 plt.tight_layout()
